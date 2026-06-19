@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: ghcr.io/inference-sim/residency-vllm:latest
+          image: ghcr.io/inference-sim/residency-vllm:0.23.0-residency
           imagePullPolicy: IfNotPresent
           resources:
             limits:
