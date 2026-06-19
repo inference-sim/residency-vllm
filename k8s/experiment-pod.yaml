@@ -1,0 +1,83 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: residency-experiment
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: init-prometheus
+          image: busybox
+          command: ["mkdir", "-p", "/tmp/prometheus_multiproc"]
+          volumeMounts:
+            - name: prom-dir
+              mountPath: /tmp/prometheus_multiproc
+      containers:
+        # --- vLLM server ---
+        - name: vllm
+          image: ghcr.io/inference-sim/residency-vllm:0.23.1-residency
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          args:
+            - "--model"
+            - "Qwen/Qwen3-14B"
+            - "--port"
+            - "8000"
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+            - name: HOME
+              value: "/cache"
+            - name: HF_HOME
+              value: "/cache/huggingface"
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: "/tmp/prometheus_multiproc"
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            - name: prom-dir
+              mountPath: /tmp/prometheus_multiproc
+
+        # --- Workload driver (waits for server, runs experiment, exits) ---
+        - name: driver
+          image: ghcr.io/inference-sim/residency-vllm-client:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for vLLM server to be ready..."
+              until curl -s http://localhost:8000/v1/models > /dev/null 2>&1; do
+                sleep 5
+              done
+              echo "Server ready. Starting experiment."
+              python3 workload_driver.py \
+                --base-url http://localhost:8000 \
+                --model "Qwen/Qwen3-14B" \
+                --tenants "tenant_A,tenant_B,tenant_C" \
+                --rate 2.0 \
+                --duration 300 \
+                --prompt-tokens 1024 \
+                --max-tokens 128 \
+                --output-dir /data/residency
+              echo "Experiment complete. Results written to /data/residency/"
+              # Signal completion by touching a file the server can detect
+              touch /data/residency/.done
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: vllm-cache-pvc
+        - name: prom-dir
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: data-pvc
