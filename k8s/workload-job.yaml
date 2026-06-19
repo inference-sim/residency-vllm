@@ -26,11 +26,11 @@ spec:
             - "--max-tokens"
             - "128"
             - "--output-dir"
-            - "/results"
+            - "/data/residency"
           volumeMounts:
-            - name: results
-              mountPath: /results
+            - name: data
+              mountPath: /data
       volumes:
-        - name: results
+        - name: data
           persistentVolumeClaim:
-            claimName: vllm-cache-pvc
+            claimName: data-pvc
