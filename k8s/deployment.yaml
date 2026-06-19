@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: ghcr.io/inference-sim/residency-vllm:0.23.0-residency
+          image: ghcr.io/inference-sim/residency-vllm:0.23.1-residency
           imagePullPolicy: IfNotPresent
           resources:
             limits:
@@ -37,13 +37,26 @@ spec:
               value: "/cache"
             - name: HF_HOME
               value: "/cache/huggingface"
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: "/tmp/prometheus_multiproc"
           volumeMounts:
             - name: cache
               mountPath: /cache
+            - name: prom-dir
+              mountPath: /tmp/prometheus_multiproc
+      initContainers:
+        - name: init-prometheus
+          image: busybox
+          command: ["mkdir", "-p", "/tmp/prometheus_multiproc"]
+          volumeMounts:
+            - name: prom-dir
+              mountPath: /tmp/prometheus_multiproc
       volumes:
         - name: cache
           persistentVolumeClaim:
             claimName: vllm-cache-pvc
+        - name: prom-dir
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

@@ -17,4 +17,7 @@ RUN VLLM_LOCATION=$(cat /tmp/vllm_location.txt) && \
     cp -r /tmp/vllm-patch/* "$VLLM_LOCATION/" && \
     rm -rf /tmp/vllm-patch
 
+# Create prometheus multiprocess directory (shared between API server + EngineCore)
+RUN mkdir -p /tmp/prometheus_multiproc
+
 ENTRYPOINT ["vllm", "serve"]
