@@ -31,7 +31,9 @@ class RequestResult:
     ttft_ms: float = 0.0
     itl_ms_list: list = field(default_factory=list)
     e2e_ms: float = 0.0
+    tpot_ms: float = 0.0       # (last_token - first_token) / (n_tokens - 1)
     num_output_tokens: int = 0
+    num_input_tokens: int = 0
     start_time: float = 0.0
 
 
@@ -167,6 +169,13 @@ async def generate_request(
         else -1.0
     )
     result.num_output_tokens = token_count
+    result.num_input_tokens = config.prompt_tokens
+
+    # TPOT: (last_token - first_token) / (n - 1), matching inference-perf
+    if first_token_time is not None and last_token_time is not None and token_count > 1:
+        result.tpot_ms = (last_token_time - first_token_time) / (token_count - 1) * 1000.0
+    else:
+        result.tpot_ms = -1.0
 
     return result
 
@@ -265,11 +274,11 @@ async def scrape_residency(base_url: str, tenants: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Statistics helpers
+# Statistics helpers (aligned with inference-perf reporting)
 # ---------------------------------------------------------------------------
 
 def percentile(data: list, p: float) -> float:
-    """Compute the p-th percentile (0-100) of a sorted list."""
+    """Compute the p-th percentile (0-100) using linear interpolation."""
     if not data:
         return 0.0
     k = (len(data) - 1) * (p / 100.0)
@@ -280,16 +289,85 @@ def percentile(data: list, p: float) -> float:
 
 
 def compute_stats(values: list) -> dict:
-    """Compute mean, p50, p95, p99 for a list of values."""
+    """Compute summary statistics matching inference-perf format.
+
+    Reports: mean, min, max, median (p50), p90, p99.
+    """
     if not values:
-        return {"mean": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0}
+        return {"mean": 0.0, "min": 0.0, "max": 0.0, "median": 0.0,
+                "p90": 0.0, "p99": 0.0}
     sorted_vals = sorted(values)
     mean_val = sum(sorted_vals) / len(sorted_vals)
     return {
         "mean": round(mean_val, 2),
-        "p50": round(percentile(sorted_vals, 50), 2),
-        "p95": round(percentile(sorted_vals, 95), 2),
+        "min": round(sorted_vals[0], 2),
+        "max": round(sorted_vals[-1], 2),
+        "median": round(percentile(sorted_vals, 50), 2),
+        "p90": round(percentile(sorted_vals, 90), 2),
         "p99": round(percentile(sorted_vals, 99), 2),
+    }
+
+
+def compute_group_metrics(requests: list) -> dict:
+    """Compute latency + throughput metrics for a group of RequestResults.
+
+    Matches inference-perf's summarize_requests structure.
+    """
+    valid = [r for r in requests if r.ttft_ms >= 0]
+    if not valid:
+        return {
+            "num_requests": len(requests),
+            "num_successful": 0,
+            "latency": {},
+            "throughput": {},
+        }
+
+    ttft_values = [r.ttft_ms for r in valid]
+    e2e_values = [r.e2e_ms for r in valid]
+    tpot_values = [r.tpot_ms for r in valid if r.tpot_ms >= 0]
+
+    # Flatten ITL across all requests (inference-perf: inter_token_latencies)
+    all_itl = []
+    for r in valid:
+        all_itl.extend(r.itl_ms_list)
+
+    # NTPOT: e2e / output_tokens (normalized time per output token)
+    ntpot_values = [
+        r.e2e_ms / r.num_output_tokens
+        for r in valid if r.num_output_tokens > 0
+    ]
+
+    # Throughput
+    total_time_s = (max(r.e2e_ms for r in valid) +
+                    max(r.start_time for r in valid) -
+                    min(r.start_time for r in valid)) / 1000.0 if valid else 1.0
+    # More accurate: use wall-clock span from first request start to last request end
+    if len(valid) > 1:
+        earliest_start = min(r.start_time for r in valid)
+        latest_end = max(r.start_time + r.e2e_ms / 1000.0 for r in valid)
+        total_time_s = latest_end - earliest_start
+
+    total_input_tokens = sum(r.num_input_tokens for r in valid)
+    total_output_tokens = sum(r.num_output_tokens for r in valid)
+
+    return {
+        "num_requests": len(requests),
+        "num_successful": len(valid),
+        "latency": {
+            "ttft_ms": compute_stats(ttft_values),
+            "tpot_ms": compute_stats(tpot_values),
+            "itl_ms": compute_stats(all_itl),
+            "e2e_ms": compute_stats(e2e_values),
+            "ntpot_ms": compute_stats(ntpot_values),
+        },
+        "throughput": {
+            "input_tokens_per_sec": round(total_input_tokens / total_time_s, 2) if total_time_s > 0 else 0.0,
+            "output_tokens_per_sec": round(total_output_tokens / total_time_s, 2) if total_time_s > 0 else 0.0,
+            "total_tokens_per_sec": round((total_input_tokens + total_output_tokens) / total_time_s, 2) if total_time_s > 0 else 0.0,
+            "requests_per_sec": round(len(valid) / total_time_s, 2) if total_time_s > 0 else 0.0,
+        },
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
     }
 
 
@@ -368,14 +446,14 @@ async def main():
     residency = await scrape_residency(config.base_url, tenants)
 
     # ---------------------------------------------------------------------------
-    # Write CSV
+    # Write per-request CSV
     # ---------------------------------------------------------------------------
     csv_path = os.path.join(config.output_dir, "requests.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "tenant_id", "request_idx", "ttft_ms", "mean_itl_ms",
-            "p50_itl_ms", "p95_itl_ms", "p99_itl_ms", "e2e_ms",
+            "tenant_id", "request_idx", "ttft_ms", "tpot_ms",
+            "mean_itl_ms", "e2e_ms", "num_input_tokens",
             "num_output_tokens", "start_time",
         ])
         for r in flat_results:
@@ -384,11 +462,10 @@ async def main():
                 r.tenant_id,
                 r.request_idx,
                 round(r.ttft_ms, 2),
+                round(r.tpot_ms, 2),
                 itl_stats["mean"],
-                itl_stats["p50"],
-                itl_stats["p95"],
-                itl_stats["p99"],
                 round(r.e2e_ms, 2),
+                r.num_input_tokens,
                 r.num_output_tokens,
                 round(r.start_time, 3),
             ])
@@ -396,32 +473,18 @@ async def main():
     print(f"  Wrote {csv_path} ({len(flat_results)} rows)")
 
     # ---------------------------------------------------------------------------
-    # Build summary
+    # Build summary (per-tenant + overall, inference-perf aligned)
     # ---------------------------------------------------------------------------
     per_tenant = {}
     for tenant_id in tenants:
         tenant_reqs = [r for r in flat_results if r.tenant_id == tenant_id]
-        # Filter out failed requests for stats
-        valid_reqs = [r for r in tenant_reqs if r.ttft_ms >= 0]
+        metrics = compute_group_metrics(tenant_reqs)
+        metrics["residency_token_seconds"] = residency.get(tenant_id, 0.0)
+        per_tenant[tenant_id] = metrics
 
-        ttft_values = [r.ttft_ms for r in valid_reqs]
-        e2e_values = [r.e2e_ms for r in valid_reqs]
-        # Flatten all ITL values across requests for this tenant
-        all_itl = []
-        for r in valid_reqs:
-            all_itl.extend(r.itl_ms_list)
-
-        total_tokens = sum(r.num_output_tokens for r in tenant_reqs)
-
-        per_tenant[tenant_id] = {
-            "num_requests": len(tenant_reqs),
-            "num_successful": len(valid_reqs),
-            "ttft_ms": compute_stats(ttft_values),
-            "itl_ms": compute_stats(all_itl),
-            "e2e_ms": compute_stats(e2e_values),
-            "total_output_tokens": total_tokens,
-            "residency_token_seconds": residency.get(tenant_id, 0.0),
-        }
+    # Overall aggregate (all tenants combined)
+    overall = compute_group_metrics(flat_results)
+    overall["residency_token_seconds_total"] = round(sum(residency.values()), 2)
 
     summary = {
         "config": {
@@ -430,15 +493,17 @@ async def main():
             "tenants": tenants,
             "prompt_tokens": config.prompt_tokens,
             "max_tokens": config.max_tokens,
-            "rate": config.rate,
+            "rate_per_tenant": config.rate,
+            "aggregate_rate": config.rate * len(tenants),
             "duration": config.duration,
             "seed": config.seed,
         },
+        "overall": overall,
         "per_tenant": per_tenant,
         "totals": {
             "total_requests": len(flat_results),
+            "total_successful": sum(1 for r in flat_results if r.ttft_ms >= 0),
             "total_duration_s": round(total_duration, 2),
-            "residency_sum": round(sum(residency.values()), 2),
         },
     }
 
@@ -449,16 +514,50 @@ async def main():
     print(f"  Wrote {json_path}")
 
     # Print quick summary
-    print("\n--- Summary ---")
+    print("\n--- Overall ---")
+    o = overall
+    if o.get("latency"):
+        print(
+            f"  Requests: {o['num_successful']}/{o['num_requests']} successful "
+            f"in {total_duration:.1f}s"
+        )
+        print(
+            f"  TTFT:  median={o['latency']['ttft_ms']['median']:.1f}ms  "
+            f"p90={o['latency']['ttft_ms']['p90']:.1f}ms  "
+            f"p99={o['latency']['ttft_ms']['p99']:.1f}ms"
+        )
+        print(
+            f"  TPOT:  median={o['latency']['tpot_ms']['median']:.1f}ms  "
+            f"p90={o['latency']['tpot_ms']['p90']:.1f}ms  "
+            f"p99={o['latency']['tpot_ms']['p99']:.1f}ms"
+        )
+        print(
+            f"  ITL:   median={o['latency']['itl_ms']['median']:.1f}ms  "
+            f"p90={o['latency']['itl_ms']['p90']:.1f}ms  "
+            f"p99={o['latency']['itl_ms']['p99']:.1f}ms"
+        )
+        print(
+            f"  E2E:   median={o['latency']['e2e_ms']['median']:.1f}ms  "
+            f"p90={o['latency']['e2e_ms']['p90']:.1f}ms  "
+            f"p99={o['latency']['e2e_ms']['p99']:.1f}ms"
+        )
+        print(
+            f"  Throughput: {o['throughput']['output_tokens_per_sec']:.0f} out tok/s  "
+            f"{o['throughput']['requests_per_sec']:.1f} req/s"
+        )
+
+    print("\n--- Per Tenant ---")
     for tid in tenants:
         s = per_tenant[tid]
-        print(
-            f"  {tid}: {s['num_requests']} reqs, "
-            f"TTFT p50={s['ttft_ms']['p50']:.0f}ms, "
-            f"E2E p50={s['e2e_ms']['p50']:.0f}ms, "
-            f"residency={s['residency_token_seconds']:.1f}"
-        )
-    print(f"  Total: {len(flat_results)} requests, {total_duration:.1f}s")
+        lat = s.get("latency", {})
+        if lat:
+            print(
+                f"  {tid}: {s['num_successful']} reqs, "
+                f"TTFT p50={lat['ttft_ms']['median']:.0f}ms, "
+                f"E2E p50={lat['e2e_ms']['median']:.0f}ms, "
+                f"residency={s['residency_token_seconds']:.1f}"
+            )
+    print()
 
 
 if __name__ == "__main__":
