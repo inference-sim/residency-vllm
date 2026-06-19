@@ -178,8 +178,9 @@ class KVCacheManager:
         self.residency_holders: dict[int, dict[str, int]] = {}
         # tenant_id → current fractional resident token count
         self.tenant_resident_tokens: dict[str, float] = defaultdict(float)
-        # request_id → tenant_id (for free-time lookup)
+        # request_id → tenant_id (used by remove_skipped_blocks)
         self.req_to_tenant: dict[str, str] = {}
+        self._residency_warned_missing_tenant: bool = False
         # block_size used for residency accounting
         self._residency_block_size: int = (
             kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
@@ -425,7 +426,7 @@ class KVCacheManager:
                 num_external_computed_tokens=num_external_computed_tokens,
             )
             # --- Residency: track prefix-cached blocks assigned to request ---
-            if getattr(request, 'tenant_id', None) is not None:
+            if getattr(request, "tenant_id", None) is not None:
                 self._residency_on_allocate(request, new_computed_block_list)
 
         new_blocks = self.coordinator.allocate_new_blocks(
@@ -436,8 +437,14 @@ class KVCacheManager:
         )
 
         # --- Residency: track all newly allocated blocks ---
-        if getattr(request, 'tenant_id', None) is not None:
+        if getattr(request, "tenant_id", None) is not None:
             self._residency_on_allocate(request, new_blocks)
+        elif not self._residency_warned_missing_tenant:
+            logger.warning(
+                "Request %s has no tenant_id — residency will not be "
+                "tracked. Ensure vllm_xargs.tenant_id is set in the "
+                "request payload.", request.request_id)
+            self._residency_warned_missing_tenant = True
 
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
@@ -466,7 +473,7 @@ class KVCacheManager:
             request: The request to free the blocks.
         """
         # --- Residency: update BEFORE blocks are freed ---
-        if getattr(request, 'tenant_id', None) is not None:
+        if getattr(request, "tenant_id", None) is not None:
             self._residency_on_free(request)
 
         self.coordinator.free(request.request_id)
@@ -482,7 +489,42 @@ class KVCacheManager:
             total_computed_tokens: The total number of computed tokens, including
                 local computed tokens and external computed tokens.
         """
+        # --- Residency: capture non-null blocks BEFORE removal ---
+        tenant = self.req_to_tenant.get(request_id)
+        blocks_before: dict[int, set[int]] = {}
+        if tenant is not None:
+            for i, mgr in enumerate(self.coordinator.single_type_managers):
+                blocks = mgr.req_to_blocks.get(request_id, [])
+                blocks_before[i] = {
+                    b.block_id for b in blocks if not b.is_null
+                }
+
         self.coordinator.remove_skipped_blocks(request_id, total_computed_tokens)
+
+        # --- Residency: decrement for blocks that were removed ---
+        if tenant is not None:
+            block_size = self._residency_block_size
+            for i, mgr in enumerate(self.coordinator.single_type_managers):
+                blocks = mgr.req_to_blocks.get(request_id, [])
+                blocks_after = {
+                    b.block_id for b in blocks if not b.is_null
+                }
+                removed_ids = blocks_before.get(i, set()) - blocks_after
+                for bid in removed_ids:
+                    holders = self.residency_holders.get(bid)
+                    if holders is None or tenant not in holders:
+                        continue
+                    holders[tenant] -= 1
+                    if holders[tenant] == 0:
+                        k = len(holders)
+                        del holders[tenant]
+                        self.tenant_resident_tokens[tenant] -= block_size / k
+                        if not holders:
+                            del self.residency_holders[bid]
+                        else:
+                            delta = block_size / (k - 1) - block_size / k
+                            for remaining in holders:
+                                self.tenant_resident_tokens[remaining] += delta
 
     def evict_blocks(self, block_ids: set[int]) -> None:
         """evict blocks from the prefix cache by their block IDs.
@@ -633,9 +675,7 @@ class KVCacheManager:
                     for existing_tenant in holders:
                         self.tenant_resident_tokens[existing_tenant] -= delta
                     holders[tenant] = 1
-                    self.tenant_resident_tokens[tenant] += (
-                        block_size / (k + 1)
-                    )
+                    self.tenant_resident_tokens[tenant] += block_size / (k + 1)
                 else:
                     # Intra-tenant sharing — tenant already credited
                     self.residency_holders[bid][tenant] += 1

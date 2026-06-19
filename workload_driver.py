@@ -85,7 +85,7 @@ async def generate_request(
         "messages": [{"role": "user", "content": prompt_text}],
         "max_tokens": config.max_tokens,
         "stream": True,
-        "user": tenant_id,  # vLLM uses this as tenant identifier
+        "vllm_xargs": {"tenant_id": tenant_id},
     }
 
     headers = {"Content-Type": "application/json"}

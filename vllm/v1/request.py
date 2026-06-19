@@ -101,10 +101,11 @@ class Request:
         # P/D: Connector-specific KV transfer parameters.
         self.kv_transfer_params: dict[str, Any] | None = None
 
+        self.tenant_id: str | None = None
+
         if pooling_params is not None:
             # Pooling models.
             self.max_tokens = 1
-            self.tenant_id: str | None = None
         elif sampling_params is not None:
             # Generative models.
             assert sampling_params.max_tokens is not None
@@ -116,11 +117,7 @@ class Request:
                 self.kv_transfer_params = sampling_params.extra_args.get(
                     "kv_transfer_params"
                 )
-                self.tenant_id: str | None = (
-                    sampling_params.extra_args.get("tenant_id")
-                )
-            else:
-                self.tenant_id: str | None = None
+                self.tenant_id = sampling_params.extra_args.get("tenant_id")
         else:
             raise ValueError("sampling_params and pooling_params can't both be unset")
 

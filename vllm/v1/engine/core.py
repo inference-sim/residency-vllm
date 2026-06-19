@@ -494,9 +494,7 @@ class EngineCore:
         tenant_tokens = self.scheduler.kv_cache_manager.tenant_resident_tokens
         for tenant, tokens in tenant_tokens.items():
             if tokens > 0:
-                self._residency_counter.labels(tenant_id=tenant).inc(
-                    tokens * dt
-                )
+                self._residency_counter.labels(tenant_id=tenant).inc(tokens * dt)
 
     def post_step(self, model_executed: bool) -> None:
         # When using async scheduling we can't get draft token ids in advance,
@@ -579,6 +577,7 @@ class EngineCore:
             return None, False
 
         # Block until the next result is available.
+        t0_batch = time.monotonic()
         future, scheduler_output, exec_model_fut = batch_queue.pop()
         with (
             self.log_error_detail(scheduler_output),
@@ -597,6 +596,9 @@ class EngineCore:
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output
         )
+
+        dt_batch = time.monotonic() - t0_batch
+        self._accumulate_residency(dt_batch)
 
         # NOTE(nick): We can either handle the deferred tasks here or save
         # in a field and do it immediately once step_with_batch_queue is
