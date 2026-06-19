@@ -83,11 +83,41 @@ if [ "$WAIT" = true ]; then
 
   echo ""
   echo "=== Experiment Complete ==="
-  echo "Results on data-pvc at /residency/"
+
+  # Download results locally
+  LOCAL_RESULTS="$SCRIPT_DIR/results"
+  mkdir -p "$LOCAL_RESULTS"
+  echo "Downloading results from data-pvc..."
+  oc run fetch-results --rm -i --restart=Never --image=busybox \
+    --overrides='{
+      "spec":{
+        "containers":[{
+          "name":"fetch-results",
+          "image":"busybox",
+          "command":["cat","/data/residency/summary.json"],
+          "volumeMounts":[{"name":"data","mountPath":"/data"}]
+        }],
+        "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"data-pvc"}}]
+      }
+    }' > "$LOCAL_RESULTS/summary.json" 2>/dev/null
+
+  oc run fetch-csv --rm -i --restart=Never --image=busybox \
+    --overrides='{
+      "spec":{
+        "containers":[{
+          "name":"fetch-csv",
+          "image":"busybox",
+          "command":["cat","/data/residency/requests.csv"],
+          "volumeMounts":[{"name":"data","mountPath":"/data"}]
+        }],
+        "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"data-pvc"}}]
+      }
+    }' > "$LOCAL_RESULTS/requests.csv" 2>/dev/null
+
+  echo "  Saved: $LOCAL_RESULTS/summary.json"
+  echo "  Saved: $LOCAL_RESULTS/requests.csv"
   echo ""
-  echo "To view summary:"
-  echo "  oc exec \$(oc get pod -l job-name=residency-experiment -o name | head -1) -c driver -- cat /data/residency/summary.json"
-  echo ""
+
   echo "Cleaning up Job..."
   oc delete job residency-experiment --ignore-not-found=true
   echo "Done."
