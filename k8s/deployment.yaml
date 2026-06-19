@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-residency
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-residency
+  template:
+    metadata:
+      labels:
+        app: vllm-residency
+    spec:
+      containers:
+        - name: vllm
+          image: ghcr.io/inference-sim/residency-vllm:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          args:
+            - "--model"
+            - "meta-llama/Llama-3.1-8B"
+            - "--port"
+            - "8000"
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+            - name: HOME
+              value: "/cache"
+            - name: HF_HOME
+              value: "/cache/huggingface"
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: vllm-cache-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-residency
+spec:
+  selector:
+    app: vllm-residency
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-cache-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi

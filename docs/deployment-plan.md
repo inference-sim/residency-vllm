@@ -34,7 +34,7 @@ these files in the installed vLLM package; everything else stays from the base.
 ## Dockerfile
 
 ```dockerfile
-ARG VLLM_BASE_VERSION=v0.15.1
+ARG VLLM_BASE_VERSION=v0.23.0
 FROM vllm/vllm-openai:${VLLM_BASE_VERSION}
 
 # prometheus_client is already in the base image — no extra pip install needed
@@ -119,7 +119,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            VLLM_BASE_VERSION=v0.15.1
+            VLLM_BASE_VERSION=v0.23.0
           cache-from: type=gha
           cache-to: type=gha,mode=max
 ```
@@ -127,8 +127,8 @@ jobs:
 ### Triggering a build
 
 ```bash
-git tag v0.15.1-residency
-git push origin v0.15.1-residency
+git tag v0.23.0-residency
+git push origin v0.23.0-residency
 # → GitHub Actions builds and pushes ghcr.io/inference-sim/residency-vllm:0.15.1-residency
 ```
 
@@ -217,7 +217,7 @@ spec:
 #    into vllm/v1/ in this repo
 
 # 2. Tag and push → triggers CI build
-git tag v0.15.1-residency && git push origin v0.15.1-residency
+git tag v0.23.0-residency && git push origin v0.23.0-residency
 
 # 3. Deploy on cluster
 kubectl apply -f k8s/deployment.yaml
@@ -236,7 +236,7 @@ curl http://vllm-residency:8000/metrics | grep residency_token_seconds
 
 ## Notes
 
-- **Base version**: `v0.15.1` is the latest stable vLLM release. The v1 engine
+- **Base version**: `v0.23.0` is the latest stable vLLM release. The v1 engine
   (with the scheduler and KVCacheManager we're patching) is the default in this
   version.
 - **No compilation**: The overlay only touches Python files. Build time is
