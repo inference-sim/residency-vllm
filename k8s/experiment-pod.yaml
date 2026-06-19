@@ -4,9 +4,11 @@ metadata:
   name: residency-experiment
 spec:
   backoffLimit: 0
+  ttlSecondsAfterFinished: 60
   template:
     spec:
       restartPolicy: Never
+      shareProcessNamespace: true
       initContainers:
         - name: init-prometheus
           image: busybox
@@ -22,11 +24,20 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: 1
+          command: ["/bin/sh", "-c"]
           args:
-            - "--model"
-            - "Qwen/Qwen3-14B"
-            - "--port"
-            - "8000"
+            - |
+              vllm serve --model Qwen/Qwen3-14B --port 8000 &
+              VLLM_PID=$!
+              # Wait for driver to signal completion
+              while [ ! -f /data/residency/.done ]; do
+                sleep 5
+              done
+              echo "Driver finished. Shutting down vLLM server."
+              kill $VLLM_PID
+              wait $VLLM_PID 2>/dev/null
+              rm -f /data/residency/.done
+              exit 0
           env:
             - name: HF_TOKEN
               valueFrom:
@@ -44,17 +55,25 @@ spec:
               mountPath: /cache
             - name: prom-dir
               mountPath: /tmp/prometheus_multiproc
+            - name: data
+              mountPath: /data
 
-        # --- Workload driver (waits for server, runs experiment, exits) ---
+        # --- Workload driver (waits for server, runs experiment, signals done) ---
         - name: driver
           image: ghcr.io/inference-sim/residency-vllm-client:latest
           command: ["/bin/sh", "-c"]
           args:
             - |
               echo "Waiting for vLLM server to be ready..."
-              until curl -s http://localhost:8000/v1/models > /dev/null 2>&1; do
-                sleep 5
-              done
+              python3 -c "
+              import urllib.request, time
+              while True:
+                  try:
+                      urllib.request.urlopen('http://localhost:8000/v1/models')
+                      break
+                  except Exception:
+                      time.sleep(5)
+              "
               echo "Server ready. Starting experiment."
               python3 workload_driver.py \
                 --base-url http://localhost:8000 \
@@ -66,7 +85,7 @@ spec:
                 --max-tokens 128 \
                 --output-dir /data/residency
               echo "Experiment complete. Results written to /data/residency/"
-              # Signal completion by touching a file the server can detect
+              # Signal server to shut down
               touch /data/residency/.done
           volumeMounts:
             - name: data
