@@ -1,6 +1,6 @@
 #!/bin/bash
 # run_ab_experiment.sh — A/B comparison: patched vs vanilla vLLM
-# Usage: ./run_ab_experiment.sh [--duration 300] [--rate 2.0] [--seed 42]
+# Usage: ./run_ab_experiment.sh [--duration 300] [--rate 2.0] [--seed 42] [--tenants "a,b,c,d,e"]
 #
 # Runs identical Poisson workloads against both servers simultaneously,
 # downloads results, and cleans up.
@@ -10,12 +10,14 @@ set -euo pipefail
 DURATION="${DURATION:-300}"
 RATE="${RATE:-2.0}"
 SEED="${SEED:-42}"
+TENANTS="${TENANTS:-tenant_A,tenant_B,tenant_C,tenant_D,tenant_E}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --duration) DURATION="$2"; shift 2 ;;
     --rate) RATE="$2"; shift 2 ;;
     --seed) SEED="$2"; shift 2 ;;
+    --tenants) TENANTS="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -24,9 +26,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JOB_YAML="$SCRIPT_DIR/k8s/ab-experiment.yaml"
 LOCAL_RESULTS="$SCRIPT_DIR/results"
 
+NUM_TENANTS=$(echo "$TENANTS" | tr ',' '\n' | wc -l | tr -d ' ')
+
 echo "=== A/B Residency Experiment ==="
 echo "  Duration: ${DURATION}s"
 echo "  Rate:     ${RATE} req/s per tenant"
+echo "  Tenants:  ${NUM_TENANTS} (${TENANTS})"
 echo "  Seed:     ${SEED}"
 echo ""
 
@@ -52,43 +57,14 @@ oc run ab-cleanup --rm -i --restart=Never --image=busybox \
     }
   }' 2>/dev/null || true
 
-# --- Apply both Jobs ---
+# --- Apply both Jobs (substitute runtime parameters into YAML) ---
 echo "Launching A/B experiment Jobs..."
-oc apply -f "$JOB_YAML"
-
-# --- Patch parameters if non-default ---
-for VARIANT in patched vanilla; do
-  JOB_NAME="residency-experiment-${VARIANT}"
-  DRIVER_ARGS="echo \"Waiting for vLLM server to be ready...\"
-python3 -c \"
-import urllib.request, time
-while True:
-    try:
-        urllib.request.urlopen('http://localhost:8000/v1/models')
-        break
-    except Exception:
-        time.sleep(5)
-\"
-echo \"Server ready. Starting experiment (${VARIANT} variant).\"
-python3 workload_driver.py \\
-  --base-url http://localhost:8000 \\
-  --model \"Qwen/Qwen3-14B\" \\
-  --tenants \"tenant_A,tenant_B,tenant_C\" \\
-  --rate ${RATE} \\
-  --duration ${DURATION} \\
-  --prompt-tokens 1024 \\
-  --max-tokens 128 \\
-  --seed ${SEED} \\
-  --output-dir /data/residency/${VARIANT}
-echo \"Experiment complete. Results written to /data/residency/${VARIANT}/\"
-touch /data/residency/${VARIANT}/.done"
-
-  if [ "$DURATION" != "300" ] || [ "$RATE" != "2.0" ] || [ "$SEED" != "42" ]; then
-    oc patch job "$JOB_NAME" --type='json' \
-      -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/1/args/0\",\"value\":\"$DRIVER_ARGS\"}]" \
-      2>/dev/null || true
-  fi
-done
+sed \
+  -e "s|--rate 2.0|--rate ${RATE}|g" \
+  -e "s|--duration 300|--duration ${DURATION}|g" \
+  -e "s|--seed 42|--seed ${SEED}|g" \
+  -e "s|tenant_A,tenant_B,tenant_C,tenant_D,tenant_E|${TENANTS}|g" \
+  "$JOB_YAML" | oc apply -f -
 
 echo "  Jobs created. Pods scheduling..."
 echo ""
@@ -128,7 +104,7 @@ for VARIANT in patched vanilla; do
         }],
         \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
       }
-    }" > "$LOCAL_RESULTS/${VARIANT}/summary.json" 2>/dev/null
+    }" 2>/dev/null | sed '/^pod.*deleted$/d' > "$LOCAL_RESULTS/${VARIANT}/summary.json"
 
   oc run "fetch-${VARIANT}-csv" --rm -i --restart=Never --image=busybox \
     --overrides="{
@@ -141,7 +117,7 @@ for VARIANT in patched vanilla; do
         }],
         \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
       }
-    }" > "$LOCAL_RESULTS/${VARIANT}/requests.csv" 2>/dev/null
+    }" 2>/dev/null | sed '/^pod.*deleted$/d' > "$LOCAL_RESULTS/${VARIANT}/requests.csv"
 
   echo "    Saved: $LOCAL_RESULTS/${VARIANT}/summary.json"
   echo "    Saved: $LOCAL_RESULTS/${VARIANT}/requests.csv"
