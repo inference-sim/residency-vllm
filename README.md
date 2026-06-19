@@ -19,8 +19,8 @@ vllm/v1/
 
 ## Prerequisites
 
-- A Kubernetes cluster with GPU nodes (nvidia.com/gpu)
-- `kubectl` configured for your cluster
+- An OpenShift cluster with GPU nodes (nvidia.com/gpu)
+- `oc` CLI configured and logged in (`oc login`)
 - A Hugging Face token with access to `meta-llama/Llama-3.1-8B`
 
 ## Quick start
@@ -28,20 +28,23 @@ vllm/v1/
 ### 1. Create the HF token secret
 
 ```bash
-kubectl create secret generic hf-token --from-literal=token=<YOUR_HF_TOKEN>
+oc create secret generic hf-token --from-literal=token=<YOUR_HF_TOKEN>
 ```
 
 ### 2. Deploy
 
 ```bash
-kubectl apply -f k8s/deployment.yaml
-kubectl wait --for=condition=ready pod -l app=vllm-residency --timeout=600s
+oc apply -f k8s/deployment.yaml
+oc wait --for=condition=ready pod -l app=vllm-residency --timeout=600s
 ```
 
 ### 3. Send a request with tenant_id
 
 ```bash
-curl http://vllm-residency:8000/v1/chat/completions \
+# From within the cluster, or via port-forward:
+oc port-forward svc/vllm-residency 8000:8000
+
+curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-3.1-8B",
@@ -54,13 +57,22 @@ curl http://vllm-residency:8000/v1/chat/completions \
 ### 4. Scrape residency metrics
 
 ```bash
-curl http://vllm-residency:8000/metrics | grep residency_token_seconds
+curl http://localhost:8000/metrics | grep residency_token_seconds
 ```
 
 Output:
 ```
 vllm:residency_token_seconds_total{tenant_id="tenant_A"} 482315.7
 ```
+
+### 5. Run the workload driver
+
+```bash
+pip install -r requirements-client.txt
+python workload_driver.py --base-url http://localhost:8000 --duration 300 --rate 2.0
+```
+
+Results are written to `./results/summary.json` and `./results/requests.csv`.
 
 ## Building the image
 
@@ -87,6 +99,8 @@ docker build -t residency-vllm:latest .
 ├── Dockerfile                           # Overlay patch onto vllm-openai base
 ├── .github/workflows/docker-build-push.yml  # CI: build + push to GHCR
 ├── k8s/deployment.yaml                  # Deployment + Service + PVC
+├── workload_driver.py                   # Poisson-arrival experiment runner
+├── requirements-client.txt              # Client-side dependencies (aiohttp)
 ├── vllm/v1/                             # Patched files (overlay source)
 │   ├── request.py
 │   ├── engine/core.py
