@@ -1,0 +1,14 @@
+# Reference vLLM source clone (not part of the overlay)
+vllm-source/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.venv/
