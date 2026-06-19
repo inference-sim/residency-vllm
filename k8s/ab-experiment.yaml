@@ -1,0 +1,199 @@
+# A/B Experiment: Patched (residency-instrumented) vs Vanilla vLLM
+# Both Jobs use identical workload parameters and seed for fair comparison.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: residency-experiment-patched
+  labels:
+    experiment: ab-residency
+    variant: patched
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: Never
+      shareProcessNamespace: true
+      initContainers:
+        - name: init-prometheus
+          image: busybox
+          command: ["mkdir", "-p", "/tmp/prometheus_multiproc"]
+          volumeMounts:
+            - name: prom-dir
+              mountPath: /tmp/prometheus_multiproc
+      containers:
+        # --- vLLM server (patched with residency instrumentation) ---
+        - name: vllm
+          image: ghcr.io/inference-sim/residency-vllm:0.23.1-residency
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              vllm serve --model Qwen/Qwen3-14B --port 8000 &
+              VLLM_PID=$!
+              while [ ! -f /data/residency/patched/.done ]; do
+                sleep 5
+              done
+              echo "Driver finished. Shutting down vLLM server."
+              kill $VLLM_PID
+              wait $VLLM_PID 2>/dev/null
+              rm -f /data/residency/patched/.done
+              exit 0
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+            - name: HOME
+              value: "/cache"
+            - name: HF_HOME
+              value: "/cache/huggingface"
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: "/tmp/prometheus_multiproc"
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            - name: prom-dir
+              mountPath: /tmp/prometheus_multiproc
+            - name: data
+              mountPath: /data
+
+        # --- Workload driver ---
+        - name: driver
+          image: ghcr.io/inference-sim/residency-vllm-client:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for vLLM server to be ready..."
+              python3 -c "
+              import urllib.request, time
+              while True:
+                  try:
+                      urllib.request.urlopen('http://localhost:8000/v1/models')
+                      break
+                  except Exception:
+                      time.sleep(5)
+              "
+              echo "Server ready. Starting experiment (patched variant)."
+              python3 workload_driver.py \
+                --base-url http://localhost:8000 \
+                --model "Qwen/Qwen3-14B" \
+                --tenants "tenant_A,tenant_B,tenant_C" \
+                --rate 2.0 \
+                --duration 300 \
+                --prompt-tokens 1024 \
+                --max-tokens 128 \
+                --seed 42 \
+                --output-dir /data/residency/patched
+              echo "Experiment complete. Results written to /data/residency/patched/"
+              touch /data/residency/patched/.done
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: vllm-cache-pvc
+        - name: prom-dir
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: data-pvc
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: residency-experiment-vanilla
+  labels:
+    experiment: ab-residency
+    variant: vanilla
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: Never
+      shareProcessNamespace: true
+      containers:
+        # --- vLLM server (stock vanilla) ---
+        - name: vllm
+          image: vllm/vllm-openai:v0.23.0
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              vllm serve --model Qwen/Qwen3-14B --port 8000 &
+              VLLM_PID=$!
+              while [ ! -f /data/residency/vanilla/.done ]; do
+                sleep 5
+              done
+              echo "Driver finished. Shutting down vLLM server."
+              kill $VLLM_PID
+              wait $VLLM_PID 2>/dev/null
+              rm -f /data/residency/vanilla/.done
+              exit 0
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+            - name: HOME
+              value: "/cache"
+            - name: HF_HOME
+              value: "/cache/huggingface"
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            - name: data
+              mountPath: /data
+
+        # --- Workload driver ---
+        - name: driver
+          image: ghcr.io/inference-sim/residency-vllm-client:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for vLLM server to be ready..."
+              python3 -c "
+              import urllib.request, time
+              while True:
+                  try:
+                      urllib.request.urlopen('http://localhost:8000/v1/models')
+                      break
+                  except Exception:
+                      time.sleep(5)
+              "
+              echo "Server ready. Starting experiment (vanilla variant)."
+              python3 workload_driver.py \
+                --base-url http://localhost:8000 \
+                --model "Qwen/Qwen3-14B" \
+                --tenants "tenant_A,tenant_B,tenant_C" \
+                --rate 2.0 \
+                --duration 300 \
+                --prompt-tokens 1024 \
+                --max-tokens 128 \
+                --seed 42 \
+                --output-dir /data/residency/vanilla
+              echo "Experiment complete. Results written to /data/residency/vanilla/"
+              touch /data/residency/vanilla/.done
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: vllm-cache-pvc
+        - name: data
+          persistentVolumeClaim:
+            claimName: data-pvc
