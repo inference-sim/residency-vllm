@@ -28,7 +28,7 @@ import aiohttp
 class RequestResult:
     tenant_id: str
     request_idx: int
-    ttft_ms: float
+    ttft_ms: float = 0.0
     itl_ms_list: list = field(default_factory=list)
     e2e_ms: float = 0.0
     num_output_tokens: int = 0
@@ -76,11 +76,9 @@ async def generate_request(
     tenant_id: str,
     request_idx: int,
     config: argparse.Namespace,
-    rng: random.Random,
+    prompt_text: str,
 ) -> RequestResult:
     """Send one streaming chat completion request and measure TTFT/ITL/E2E."""
-
-    prompt_text = generate_prompt(config.prompt_tokens, rng)
 
     payload = {
         "model": config.model,
@@ -203,9 +201,12 @@ async def tenant_worker(
             if time.time() >= deadline:
                 break
 
+            # Generate prompt in the loop (rng used sequentially)
+            prompt_text = generate_prompt(config.prompt_tokens, rng)
+
             # Fire request (don't await — let it run concurrently)
             task = asyncio.create_task(
-                generate_request(session, tenant_id, request_idx, config, rng)
+                generate_request(session, tenant_id, request_idx, config, prompt_text)
             )
             tasks.append(task)
             request_idx += 1
