@@ -104,7 +104,7 @@ for VARIANT in patched vanilla; do
         }],
         \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
       }
-    }" 2>/dev/null | sed '/^pod.*deleted$/d' > "$LOCAL_RESULTS/${VARIANT}/summary.json"
+    }" 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/${VARIANT}/summary.json"
 
   oc run "fetch-${VARIANT}-csv" --rm -i --restart=Never --image=busybox \
     --overrides="{
@@ -117,7 +117,7 @@ for VARIANT in patched vanilla; do
         }],
         \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
       }
-    }" 2>/dev/null | sed '/^pod.*deleted$/d' > "$LOCAL_RESULTS/${VARIANT}/requests.csv"
+    }" 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/${VARIANT}/requests.csv"
 
   echo "    Saved: $LOCAL_RESULTS/${VARIANT}/summary.json"
   echo "    Saved: $LOCAL_RESULTS/${VARIANT}/requests.csv"
@@ -142,15 +142,25 @@ if command -v python3 &>/dev/null; then
     if [ -f "$LOCAL_RESULTS/${VARIANT}/summary.json" ]; then
       LABEL=$(echo "$VARIANT" | tr '[:lower:]' '[:upper:]')
       python3 -c "
-import json, sys
+import json
 with open('$LOCAL_RESULTS/${VARIANT}/summary.json') as f:
     d = json.load(f)
-tenants = d.get('per_tenant', {})
-first = next(iter(tenants.values()), {})
-ttft = first.get('ttft_ms', {}).get('p50', 'N/A')
-itl = first.get('itl_ms', {}).get('p50', 'N/A')
-e2e = first.get('e2e_latency_ms', {}).get('p50', 'N/A')
-print(f'  $LABEL: TTFT p50={ttft}ms  ITL p50={itl}ms  E2E p50={e2e}ms')
+# Support both old format (per_tenant.X.ttft_ms.p50) and new (overall.latency.ttft_ms.median)
+if 'overall' in d:
+    lat = d['overall'].get('latency', {})
+    ttft = lat.get('ttft_ms', {}).get('median', 'N/A')
+    itl = lat.get('itl_ms', {}).get('median', 'N/A')
+    e2e = lat.get('e2e_ms', {}).get('median', 'N/A')
+    tput = d['overall'].get('throughput', {}).get('output_tokens_per_sec', 'N/A')
+    print(f'  $LABEL: TTFT={ttft}ms  ITL={itl}ms  E2E={e2e}ms  out_tok/s={tput}')
+else:
+    tenants = d.get('per_tenant', {})
+    first = next(iter(tenants.values()), {})
+    ttft = first.get('ttft_ms', {}).get('p50', first.get('ttft_ms', {}).get('median', 'N/A'))
+    itl = first.get('itl_ms', {}).get('p50', first.get('itl_ms', {}).get('median', 'N/A'))
+    e2e = first.get('e2e_ms', {}).get('p50', first.get('e2e_ms', {}).get('median', 'N/A'))
+    n = sum(t.get('num_requests', 0) for t in tenants.values())
+    print(f'  $LABEL: TTFT={ttft}ms  ITL={itl}ms  E2E={e2e}ms  reqs={n}')
 " 2>/dev/null || echo "  ${VARIANT}: (could not parse summary)"
     fi
   done

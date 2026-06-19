@@ -100,7 +100,7 @@ if [ "$WAIT" = true ]; then
         }],
         "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"data-pvc"}}]
       }
-    }' 2>/dev/null | sed '/^pod.*deleted$/d' > "$LOCAL_RESULTS/summary.json"
+    }' 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/summary.json"
 
   oc run fetch-csv --rm -i --restart=Never --image=busybox \
     --overrides='{
@@ -113,7 +113,7 @@ if [ "$WAIT" = true ]; then
         }],
         "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"data-pvc"}}]
       }
-    }' 2>/dev/null | sed '/^pod.*deleted$/d' > "$LOCAL_RESULTS/requests.csv"
+    }' 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/requests.csv"
 
   echo "  Saved: $LOCAL_RESULTS/summary.json"
   echo "  Saved: $LOCAL_RESULTS/requests.csv"
