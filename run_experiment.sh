@@ -1,21 +1,22 @@
 #!/bin/bash
 # run_experiment.sh — Launch a residency experiment on OpenShift
-# Usage: ./run_experiment.sh [--duration 300] [--rate 2.0] [--wait]
+# Usage: ./run_experiment.sh [--duration 300] [--rate 2.0] [--no-wait]
 #
-# Cleans up any previous experiment, launches the Job, optionally
-# waits for completion and prints results.
+# Cleans up any previous experiment, launches the Job, waits for
+# completion, downloads results locally, and tears down the pod.
+# Pass --no-wait to run in background without downloading results.
 
 set -euo pipefail
 
 DURATION="${DURATION:-300}"
 RATE="${RATE:-2.0}"
-WAIT=false
+WAIT=true
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --duration) DURATION="$2"; shift 2 ;;
     --rate) RATE="$2"; shift 2 ;;
-    --wait) WAIT=true; shift ;;
+    --no-wait) WAIT=false; shift ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
