@@ -39,8 +39,7 @@ server simultaneously.
 |---|---|
 | Arrival process | Poisson (independent per tenant) |
 | Inter-arrival time | `random.expovariate(rate)` per tenant |
-| Prompt length | 1024 words → ~1024 tokens (see Token Distribution below) |
-| Total input tokens | ~1032 (1024 prompt + 8 chat-template overhead) |
+| Prompt tokens | 1024 (see Token Distribution below) |
 | Max output tokens | 128 (always hit — output is exactly 128 tokens) |
 | Streaming | Yes (SSE) |
 | Duration | 600 seconds per experiment |
@@ -49,21 +48,30 @@ server simultaneously.
 
 ### Token Distribution
 
-The workload driver generates prompts by sampling 1024 words uniformly from a
-131-word English vocabulary (`_VOCAB` in `workload_driver.py`). Verification
-with the Qwen3-14B tokenizer confirms:
+The workload driver generates prompts by sampling 1024 **words** uniformly from
+a 131-word English vocabulary (`_VOCAB` in `workload_driver.py`). The driver's
+`--prompt-tokens` flag controls the number of words, not actual BPE tokens — the
+naming is a misnomer reflecting the ~1:1 word-to-token ratio for this vocabulary.
+
+**Words vs tokens (verified with Qwen3-14B tokenizer):**
 
 | Property | Value |
 |---|---|
 | Words per prompt | 1024 (fixed) |
-| Tokens per prompt (content only) | ~1024 (mean=1024.03, std=0.17 across 100 samples) |
-| Chat-template overhead | 8 tokens (`<\|im_start\|>user\n...<\|im_end\|>\n<\|im_start\|>assistant`) |
-| **Total input tokens per request** | **~1032** (min=1032, max=1033) |
+| Content tokens per prompt | ~1024 (mean=1024.03, std=0.17) |
+| Chat-template overhead | 8 tokens (ChatML: `<\|im_start\|>user\n...<\|im_end\|>\n<\|im_start\|>assistant`) |
+| Total tokens seen by model | ~1032 |
 | Output tokens per request | 128 (always hits `max_tokens`) |
-| Vocabulary | 131 common English words, 130 tokenize to exactly 1 token¹ |
 
-¹ One word ("saw") tokenizes to 2 tokens, causing occasional prompts to have
-1025 content tokens instead of 1024 (std=0.17, negligible variance).
+The ~1:1 ratio holds because 130 of the 131 vocabulary words tokenize to
+exactly 1 token with Qwen3-14B's tokenizer. The exception is "saw" (2 tokens),
+which causes occasional prompts to have 1025 content tokens (std=0.17,
+negligible variance).
+
+The summary.json and workload driver report `prompt_tokens: 1024` (the CLI
+argument). The actual tokens seen by the model are ~1032 due to the 8-token
+chat-template overhead added by vLLM when using the `/v1/chat/completions`
+endpoint.
 
 All tenants use identical token distributions (homogeneous workload). The only
 difference between tenants is their arrival process seed (`42 + tenant_index`).
