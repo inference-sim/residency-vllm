@@ -65,21 +65,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Extract client metadata
-        id: meta-client
+      - name: Extract observe client metadata
+        id: meta-observe
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-client
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-observe
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
 
-      - name: Build and push client image
+      - name: Build and push observe client image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.client
+          file: Dockerfile.observe
           push: true
-          tags: ${{ steps.meta-client.outputs.tags }}
+          tags: ${{ steps.meta-observe.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

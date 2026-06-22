@@ -2,8 +2,9 @@
 # run_ab_experiment.sh — A/B comparison: patched vs vanilla vLLM
 # Usage: ./run_ab_experiment.sh [--duration 300] [--rate 2.0] [--seed 42] [--tenants "a,b,c,d,e"]
 #
-# Runs identical Poisson workloads against both servers simultaneously,
-# downloads results, and cleans up.
+# Generates a blis observe workload spec from the arguments, uploads it to
+# the shared PVC, launches both experiment Jobs, downloads results (including
+# trace files), and cleans up.
 
 set -euo pipefail
 
@@ -26,14 +27,57 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JOB_YAML="$SCRIPT_DIR/k8s/ab-experiment.yaml"
 LOCAL_RESULTS="$SCRIPT_DIR/results"
 
-NUM_TENANTS=$(echo "$TENANTS" | tr ',' '\n' | wc -l | tr -d ' ')
+# Parse tenants into array
+IFS=',' read -ra TENANT_ARRAY <<< "$TENANTS"
+NUM_TENANTS=${#TENANT_ARRAY[@]}
 
-echo "=== A/B Residency Experiment ==="
-echo "  Duration: ${DURATION}s"
-echo "  Rate:     ${RATE} req/s per tenant"
-echo "  Tenants:  ${NUM_TENANTS} (${TENANTS})"
-echo "  Seed:     ${SEED}"
+# Compute aggregate rate and horizon
+AGGREGATE_RATE=$(echo "$RATE * $NUM_TENANTS" | bc -l)
+HORIZON=$(echo "$DURATION * 1000000" | bc)
+RATE_FRACTION=$(echo "scale=6; 1.0 / $NUM_TENANTS" | bc -l)
+
+echo "=== A/B Residency Experiment (blis observe) ==="
+echo "  Duration:       ${DURATION}s"
+echo "  Rate:           ${RATE} req/s per tenant"
+echo "  Aggregate rate: ${AGGREGATE_RATE} req/s"
+echo "  Tenants:        ${NUM_TENANTS} (${TENANTS})"
+echo "  Seed:           ${SEED}"
 echo ""
+
+# --- Generate workload spec YAML ---
+echo "Generating workload spec..."
+WORKLOAD_SPEC=$(mktemp /tmp/workload-XXXXXX.yaml)
+
+cat > "$WORKLOAD_SPEC" <<EOF
+version: "2"
+seed: ${SEED}
+aggregate_rate: ${AGGREGATE_RATE}
+horizon: ${HORIZON}
+
+clients:
+EOF
+
+for TENANT in "${TENANT_ARRAY[@]}"; do
+  TENANT=$(echo "$TENANT" | xargs)  # trim whitespace
+  cat >> "$WORKLOAD_SPEC" <<EOF
+  - id: "${TENANT}"
+    tenant_id: "${TENANT}"
+    rate_fraction: ${RATE_FRACTION}
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: constant
+      params:
+        value: 1024
+    output_distribution:
+      type: constant
+      params:
+        value: 128
+EOF
+done
+
+echo "  Generated: $WORKLOAD_SPEC"
 
 # --- Teardown previous runs ---
 echo "Cleaning up previous A/B experiments..."
@@ -43,19 +87,24 @@ while oc get pod -l experiment=ab-residency -o name 2>/dev/null | grep -q pod; d
 done
 echo "  Done."
 
-# --- Clear stale signal files ---
-oc run ab-cleanup --rm -i --restart=Never --image=busybox \
+# --- Upload workload spec + clear stale signal files ---
+echo "Uploading workload spec to data-pvc..."
+oc run ab-setup --rm -i --restart=Never --image=busybox \
   --overrides='{
     "spec":{
       "containers":[{
-        "name":"ab-cleanup",
+        "name":"ab-setup",
         "image":"busybox",
-        "command":["sh","-c","rm -f /data/residency/patched/.done /data/residency/vanilla/.done"],
+        "command":["sh","-c","mkdir -p /data/residency && cat > /data/residency/workload.yaml && rm -f /data/residency/patched/.done /data/residency/vanilla/.done"],
+        "stdin": true,
         "volumeMounts":[{"name":"data","mountPath":"/data"}]
       }],
       "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"data-pvc"}}]
     }
-  }' 2>/dev/null || true
+  }' < "$WORKLOAD_SPEC" 2>/dev/null || true
+
+rm -f "$WORKLOAD_SPEC"
+echo "  Done."
 
 # --- Apply both Jobs (substitute runtime parameters into YAML) ---
 echo "Launching A/B experiment Jobs..."
@@ -63,7 +112,6 @@ sed \
   -e "s|--rate 2.0|--rate ${RATE}|g" \
   -e "s|--duration 300|--duration ${DURATION}|g" \
   -e "s|--seed 42|--seed ${SEED}|g" \
-  -e "s|tenant_A,tenant_B,tenant_C,tenant_D,tenant_E|${TENANTS}|g" \
   "$JOB_YAML" | oc apply -f -
 
 echo "  Jobs created. Pods scheduling..."
@@ -90,37 +138,35 @@ echo ""
 echo "=== Downloading Results ==="
 mkdir -p "$LOCAL_RESULTS/patched" "$LOCAL_RESULTS/vanilla"
 
+# Files to download from each variant
+RESULT_FILES="summary.json requests.csv trace.yaml trace.csv trace.itl.csv"
+
 for VARIANT in patched vanilla; do
   echo "  Fetching ${VARIANT} results..."
 
-  oc run "fetch-${VARIANT}-summary" --rm -i --restart=Never --image=busybox \
-    --overrides="{
-      \"spec\":{
-        \"containers\":[{
-          \"name\":\"fetch-${VARIANT}-summary\",
-          \"image\":\"busybox\",
-          \"command\":[\"cat\",\"/data/residency/${VARIANT}/summary.json\"],
-          \"volumeMounts\":[{\"name\":\"data\",\"mountPath\":\"/data\"}]
-        }],
-        \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
-      }
-    }" 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/${VARIANT}/summary.json"
+  for FILE in $RESULT_FILES; do
+    # Use filename stem for pod name (must be DNS-safe)
+    POD_SUFFIX=$(echo "${FILE}" | tr '.' '-')
+    oc run "fetch-${VARIANT}-${POD_SUFFIX}" --rm -i --restart=Never --image=busybox \
+      --overrides="{
+        \"spec\":{
+          \"containers\":[{
+            \"name\":\"fetch\",
+            \"image\":\"busybox\",
+            \"command\":[\"cat\",\"/data/residency/${VARIANT}/${FILE}\"],
+            \"volumeMounts\":[{\"name\":\"data\",\"mountPath\":\"/data\"}]
+          }],
+          \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
+        }
+      }" 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/${VARIANT}/${FILE}" || true
 
-  oc run "fetch-${VARIANT}-csv" --rm -i --restart=Never --image=busybox \
-    --overrides="{
-      \"spec\":{
-        \"containers\":[{
-          \"name\":\"fetch-${VARIANT}-csv\",
-          \"image\":\"busybox\",
-          \"command\":[\"cat\",\"/data/residency/${VARIANT}/requests.csv\"],
-          \"volumeMounts\":[{\"name\":\"data\",\"mountPath\":\"/data\"}]
-        }],
-        \"volumes\":[{\"name\":\"data\",\"persistentVolumeClaim\":{\"claimName\":\"data-pvc\"}}]
-      }
-    }" 2>/dev/null | sed 's/pod ".*" deleted//g' > "$LOCAL_RESULTS/${VARIANT}/requests.csv"
-
-  echo "    Saved: $LOCAL_RESULTS/${VARIANT}/summary.json"
-  echo "    Saved: $LOCAL_RESULTS/${VARIANT}/requests.csv"
+    if [ -s "$LOCAL_RESULTS/${VARIANT}/${FILE}" ]; then
+      echo "    Saved: $LOCAL_RESULTS/${VARIANT}/${FILE}"
+    else
+      # File may not exist (e.g., trace.itl.csv if --record-itl failed); remove empty stub
+      rm -f "$LOCAL_RESULTS/${VARIANT}/${FILE}"
+    fi
+  done
 done
 
 echo ""

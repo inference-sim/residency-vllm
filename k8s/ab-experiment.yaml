@@ -1,5 +1,6 @@
 # A/B Experiment: Patched (residency-instrumented) vs Vanilla vLLM
 # Both Jobs use identical workload parameters and seed for fair comparison.
+# Driver: blis observe (replaces workload_driver.py)
 ---
 apiVersion: batch/v1
 kind: Job
@@ -63,35 +64,46 @@ spec:
             - name: data
               mountPath: /data
 
-        # --- Workload driver ---
+        # --- Workload driver (blis observe) ---
         - name: driver
-          image: ghcr.io/inference-sim/residency-vllm-client:latest
+          image: ghcr.io/inference-sim/residency-vllm-observe:latest
           command: ["/bin/sh", "-c"]
           args:
             - |
               echo "Waiting for vLLM server to be ready..."
-              python3 -c "
-              import urllib.request, time
-              while True:
-                  try:
-                      urllib.request.urlopen('http://localhost:8000/v1/models')
-                      break
-                  except Exception:
-                      time.sleep(5)
-              "
+              while ! wget -q -O /dev/null http://localhost:8000/v1/models 2>/dev/null; do
+                sleep 5
+              done
               echo "Server ready. Starting experiment (patched variant)."
-              python3 workload_driver.py \
-                --base-url http://localhost:8000 \
-                --model "Qwen/Qwen3-14B" \
-                --tenants "tenant_A,tenant_B,tenant_C,tenant_D,tenant_E" \
+
+              VARIANT="patched"
+              OUTPUT_DIR="/data/residency/${VARIANT}"
+              mkdir -p "$OUTPUT_DIR"
+
+              blis observe \
+                --server-url http://localhost:8000 \
+                --model Qwen/Qwen3-14B \
+                --api-format chat \
+                --workload-spec /data/residency/workload.yaml \
+                --seed 42 \
+                --trace-header "${OUTPUT_DIR}/trace.yaml" \
+                --trace-data "${OUTPUT_DIR}/trace.csv" \
+                --record-itl
+
+              echo "blis observe complete. Post-processing..."
+
+              python3 /app/postprocess_trace.py \
+                --trace-csv "${OUTPUT_DIR}/trace.csv" \
+                --itl-csv "${OUTPUT_DIR}/trace.itl.csv" \
+                --output-dir "$OUTPUT_DIR" \
+                --server-url http://localhost:8000 \
+                --model Qwen/Qwen3-14B \
                 --rate 2.0 \
                 --duration 300 \
-                --prompt-tokens 1024 \
-                --max-tokens 128 \
-                --seed 42 \
-                --output-dir /data/residency/patched
-              echo "Experiment complete. Results written to /data/residency/patched/"
-              touch /data/residency/patched/.done
+                --seed 42
+
+              echo "Experiment complete. Results written to ${OUTPUT_DIR}/"
+              touch "${OUTPUT_DIR}/.done"
           volumeMounts:
             - name: data
               mountPath: /data
@@ -157,35 +169,46 @@ spec:
             - name: data
               mountPath: /data
 
-        # --- Workload driver ---
+        # --- Workload driver (blis observe) ---
         - name: driver
-          image: ghcr.io/inference-sim/residency-vllm-client:latest
+          image: ghcr.io/inference-sim/residency-vllm-observe:latest
           command: ["/bin/sh", "-c"]
           args:
             - |
               echo "Waiting for vLLM server to be ready..."
-              python3 -c "
-              import urllib.request, time
-              while True:
-                  try:
-                      urllib.request.urlopen('http://localhost:8000/v1/models')
-                      break
-                  except Exception:
-                      time.sleep(5)
-              "
+              while ! wget -q -O /dev/null http://localhost:8000/v1/models 2>/dev/null; do
+                sleep 5
+              done
               echo "Server ready. Starting experiment (vanilla variant)."
-              python3 workload_driver.py \
-                --base-url http://localhost:8000 \
-                --model "Qwen/Qwen3-14B" \
-                --tenants "tenant_A,tenant_B,tenant_C,tenant_D,tenant_E" \
+
+              VARIANT="vanilla"
+              OUTPUT_DIR="/data/residency/${VARIANT}"
+              mkdir -p "$OUTPUT_DIR"
+
+              blis observe \
+                --server-url http://localhost:8000 \
+                --model Qwen/Qwen3-14B \
+                --api-format chat \
+                --workload-spec /data/residency/workload.yaml \
+                --seed 42 \
+                --trace-header "${OUTPUT_DIR}/trace.yaml" \
+                --trace-data "${OUTPUT_DIR}/trace.csv" \
+                --record-itl
+
+              echo "blis observe complete. Post-processing..."
+
+              python3 /app/postprocess_trace.py \
+                --trace-csv "${OUTPUT_DIR}/trace.csv" \
+                --itl-csv "${OUTPUT_DIR}/trace.itl.csv" \
+                --output-dir "$OUTPUT_DIR" \
+                --server-url http://localhost:8000 \
+                --model Qwen/Qwen3-14B \
                 --rate 2.0 \
                 --duration 300 \
-                --prompt-tokens 1024 \
-                --max-tokens 128 \
-                --seed 42 \
-                --output-dir /data/residency/vanilla
-              echo "Experiment complete. Results written to /data/residency/vanilla/"
-              touch /data/residency/vanilla/.done
+                --seed 42
+
+              echo "Experiment complete. Results written to ${OUTPUT_DIR}/"
+              touch "${OUTPUT_DIR}/.done"
           volumeMounts:
             - name: data
               mountPath: /data

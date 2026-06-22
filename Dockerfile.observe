@@ -1,0 +1,24 @@
+# Multi-stage build: blis observe client + Python post-processing.
+#
+# Build with:
+#   docker build -f Dockerfile.observe -t ghcr.io/inference-sim/residency-vllm-observe:latest .
+#
+# Or on OpenShift:
+#   oc new-build --binary --name=residency-vllm-observe --strategy=docker
+#   oc start-build residency-vllm-observe --from-dir=. --follow
+
+# Stage 1: Build blis binary from inference-sim source
+FROM golang:1.24 AS builder
+RUN git clone https://github.com/inference-sim/inference-sim.git /src
+WORKDIR /src
+RUN go build -o /blis .
+
+# Stage 2: Runtime with blis + Python for post-processing
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir numpy
+
+COPY --from=builder /blis /usr/local/bin/blis
+COPY postprocess_trace.py /app/postprocess_trace.py
+
+WORKDIR /app
