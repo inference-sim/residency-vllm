@@ -193,6 +193,7 @@ Statistics reported: mean, min, max, median, p90, p99.
 
 ## Documentation
 
+- [Experiment specifications](experiment_specs.md) — hardware, model, workload, metrics, and findings
 - [Reproduction guide](reproduce.md) — step-by-step pipeline reproduction
 - [Design document](docs/vllm-residency-design.md) — architecture, incremental tracking, conservation invariants
 - [Patch specification](docs/vllm-patch-spec.md) — exact code changes with line numbers
