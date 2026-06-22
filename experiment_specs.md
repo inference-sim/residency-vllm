@@ -39,12 +39,34 @@ server simultaneously.
 |---|---|
 | Arrival process | Poisson (independent per tenant) |
 | Inter-arrival time | `random.expovariate(rate)` per tenant |
-| Prompt length | ~1024 tokens (1024 random common English words; actual token count varies slightly by tokenizer) |
-| Max output tokens | 128 |
+| Prompt length | 1024 words → exactly 1024 tokens (see Token Distribution below) |
+| Total input tokens | 1029 (1024 prompt + 5 chat-template overhead) |
+| Max output tokens | 128 (always hit — output is exactly 128 tokens) |
 | Streaming | Yes (SSE) |
 | Duration | 600 seconds per experiment |
 | Random seed | 42 (tenant seeds: 42 + tenant_index) |
 | Warmup | None (cold start included) |
+
+### Token Distribution
+
+The workload driver generates prompts by sampling 1024 words uniformly from a
+131-word English vocabulary (`_VOCAB` in `workload_driver.py`). Verification
+with the Qwen3-14B tokenizer confirms:
+
+| Property | Value |
+|---|---|
+| Words per prompt | 1024 (fixed) |
+| Tokens per prompt (content only) | 1024 (std = 0.00 across 100 samples) |
+| Chat-template overhead | 5 tokens (system/user role markers) |
+| **Total input tokens per request** | **1029** |
+| Output tokens per request | 128 (always hits `max_tokens`) |
+| Vocabulary | 131 common English words, all tokenize to exactly 1 token¹ |
+
+¹ One word ("saw") tokenizes to 2 tokens, but the variance is negligible in
+practice — measured standard deviation is 0.00 across 100 random prompts.
+
+All tenants use identical token distributions (homogeneous workload). The only
+difference between tenants is their arrival process seed (`42 + tenant_index`).
 
 ### Tenant ID injection
 
@@ -146,7 +168,7 @@ Each experiment produces per variant:
 - At non-saturated load (1-2 req/s/tenant), the residency instrumentation adds
   **~1% E2E overhead** (median across all per-tenant p50 comparisons).
 - Both variants exhibit identical scaling behavior up to the saturation point
-  (~3 req/s/tenant for this model on A100).
+  (~3 req/s/tenant for this model on H100).
 - Beyond saturation, queueing dominates and small per-step differences are
   amplified (TTFT grows to tens of seconds as requests queue).
 - The overhead is most directly visible in ITL (~0.25-2%) since the residency
