@@ -103,7 +103,7 @@ streaming token timestamps.
 | Parameter | Value |
 |---|---|
 | Model | Qwen/Qwen3-14B |
-| Prompt length | 1024 tokens |
+| Prompt length | 1024 words (~1032 tokens after chat template) |
 | Max output tokens | 128 |
 | Arrival process | Poisson (per-tenant) |
 | Duration | 600s |

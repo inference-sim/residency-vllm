@@ -273,7 +273,7 @@ A source patch is the only viable approach.
 | Parameter | Value |
 |-----------|-------|
 | Tenants | 3 |
-| Prompt length | 1024 tokens |
+| Prompt length | 1024 words (~1032 tokens after chat template) |
 | Max output tokens | 128 |
 | Rate per tenant | 2 req/s (Poisson) |
 | Duration | 5 minutes (300 requests/tenant) |
