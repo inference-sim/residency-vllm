@@ -1,0 +1,120 @@
+{
+  "config": {
+    "base_url": "http://localhost:8000",
+    "model": "Qwen/Qwen3-14B",
+    "tenants": [
+      "tenant_A",
+      "tenant_B",
+      "tenant_C",
+      "tenant_D"
+    ],
+    "prompt_tokens": 1024,
+    "max_tokens": 128,
+    "rate": 2.0,
+    "duration": 600,
+    "seed": 42
+  },
+  "per_tenant": {
+    "tenant_A": {
+      "num_requests": 1183,
+      "num_successful": 1183,
+      "ttft_ms": {
+        "mean": 93.5,
+        "p50": 77.08,
+        "p95": 155.84,
+        "p99": 207.01
+      },
+      "itl_ms": {
+        "mean": 17.67,
+        "p50": 12.88,
+        "p95": 48.05,
+        "p99": 86.35
+      },
+      "e2e_ms": {
+        "mean": 2337.08,
+        "p50": 2312.15,
+        "p95": 2821.1,
+        "p99": 3048.79
+      },
+      "total_output_tokens": 151424,
+      "residency_token_seconds": 2519355.679362661
+    },
+    "tenant_B": {
+      "num_requests": 1203,
+      "num_successful": 1203,
+      "ttft_ms": {
+        "mean": 94.38,
+        "p50": 77.73,
+        "p95": 161.5,
+        "p99": 217.79
+      },
+      "itl_ms": {
+        "mean": 17.71,
+        "p50": 12.88,
+        "p95": 48.1,
+        "p99": 87.03
+      },
+      "e2e_ms": {
+        "mean": 2342.95,
+        "p50": 2328.55,
+        "p95": 2805.8,
+        "p99": 3025.29
+      },
+      "total_output_tokens": 153984,
+      "residency_token_seconds": 2568015.600579851
+    },
+    "tenant_C": {
+      "num_requests": 1143,
+      "num_successful": 1143,
+      "ttft_ms": {
+        "mean": 94.88,
+        "p50": 78.27,
+        "p95": 157.19,
+        "p99": 205.16
+      },
+      "itl_ms": {
+        "mean": 17.73,
+        "p50": 12.9,
+        "p95": 48.1,
+        "p99": 86.62
+      },
+      "e2e_ms": {
+        "mean": 2346.06,
+        "p50": 2317.46,
+        "p95": 2828.72,
+        "p99": 3073.82
+      },
+      "total_output_tokens": 146304,
+      "residency_token_seconds": 2442110.8048238577
+    },
+    "tenant_D": {
+      "num_requests": 1154,
+      "num_successful": 1154,
+      "ttft_ms": {
+        "mean": 92.9,
+        "p50": 77.91,
+        "p95": 153.67,
+        "p99": 207.57
+      },
+      "itl_ms": {
+        "mean": 17.74,
+        "p50": 12.88,
+        "p95": 48.04,
+        "p99": 86.62
+      },
+      "e2e_ms": {
+        "mean": 2346.19,
+        "p50": 2325.43,
+        "p95": 2817.59,
+        "p99": 3072.36
+      },
+      "total_output_tokens": 147712,
+      "residency_token_seconds": 2465616.499478866
+    }
+  },
+  "totals": {
+    "total_requests": 4683,
+    "total_duration_s": 601.62,
+    "residency_sum": 9995098.58
+  }
+}

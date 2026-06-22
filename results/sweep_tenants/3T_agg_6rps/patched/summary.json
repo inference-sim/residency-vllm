@@ -1,0 +1,95 @@
+{
+  "config": {
+    "base_url": "http://localhost:8000",
+    "model": "Qwen/Qwen3-14B",
+    "tenants": [
+      "tenant_A",
+      "tenant_B",
+      "tenant_C"
+    ],
+    "prompt_tokens": 1024,
+    "max_tokens": 128,
+    "rate": 2.0,
+    "duration": 600,
+    "seed": 42
+  },
+  "per_tenant": {
+    "tenant_A": {
+      "num_requests": 1183,
+      "num_successful": 1183,
+      "ttft_ms": {
+        "mean": 84.16,
+        "p50": 73.5,
+        "p95": 135.35,
+        "p99": 176.92
+      },
+      "itl_ms": {
+        "mean": 15.44,
+        "p50": 12.3,
+        "p95": 45.26,
+        "p99": 48.74
+      },
+      "e2e_ms": {
+        "mean": 2044.58,
+        "p50": 2006.01,
+        "p95": 2390.67,
+        "p99": 2581.01
+      },
+      "total_output_tokens": 151419,
+      "residency_token_seconds": 2209553.49366331
+    },
+    "tenant_B": {
+      "num_requests": 1203,
+      "num_successful": 1203,
+      "ttft_ms": {
+        "mean": 84.39,
+        "p50": 73.65,
+        "p95": 132.29,
+        "p99": 171.26
+      },
+      "itl_ms": {
+        "mean": 15.4,
+        "p50": 12.29,
+        "p95": 45.18,
+        "p99": 48.58
+      },
+      "e2e_ms": {
+        "mean": 2039.99,
+        "p50": 2010.95,
+        "p95": 2376.94,
+        "p99": 2525.34
+      },
+      "total_output_tokens": 153981,
+      "residency_token_seconds": 2244833.9847499053
+    },
+    "tenant_C": {
+      "num_requests": 1143,
+      "num_successful": 1143,
+      "ttft_ms": {
+        "mean": 85.01,
+        "p50": 73.79,
+        "p95": 138.87,
+        "p99": 176.81
+      },
+      "itl_ms": {
+        "mean": 15.44,
+        "p50": 12.3,
+        "p95": 45.2,
+        "p99": 48.59
+      },
+      "e2e_ms": {
+        "mean": 2046.47,
+        "p50": 2011.08,
+        "p95": 2384.43,
+        "p99": 2551.86
+      },
+      "total_output_tokens": 146303,
+      "residency_token_seconds": 2136692.6666569514
+    }
+  },
+  "totals": {
+    "total_requests": 3529,
+    "total_duration_s": 601.59,
+    "residency_sum": 6591080.15
+  }
+}

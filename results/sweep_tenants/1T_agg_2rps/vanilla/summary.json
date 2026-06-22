@@ -1,0 +1,45 @@
+{
+  "config": {
+    "base_url": "http://localhost:8000",
+    "model": "Qwen/Qwen3-14B",
+    "tenants": [
+      "tenant_A"
+    ],
+    "prompt_tokens": 1024,
+    "max_tokens": 128,
+    "rate": 2.0,
+    "duration": 600,
+    "seed": 42
+  },
+  "per_tenant": {
+    "tenant_A": {
+      "num_requests": 1182,
+      "num_successful": 1182,
+      "ttft_ms": {
+        "mean": 73.61,
+        "p50": 71.12,
+        "p95": 104.15,
+        "p99": 114.66
+      },
+      "itl_ms": {
+        "mean": 12.54,
+        "p50": 11.6,
+        "p95": 12.33,
+        "p99": 47.43
+      },
+      "e2e_ms": {
+        "mean": 1665.87,
+        "p50": 1650.94,
+        "p95": 1844.67,
+        "p99": 1921.33
+      },
+      "total_output_tokens": 151296,
+      "residency_token_seconds": 0.0
+    }
+  },
+  "totals": {
+    "total_requests": 1182,
+    "total_duration_s": 601.44,
+    "residency_sum": 0.0
+  }
+}
