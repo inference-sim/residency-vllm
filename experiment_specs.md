@@ -159,7 +159,7 @@ Each experiment produces per variant:
 | File | Contents |
 |---|---|
 | `summary.json` | Per-tenant + overall latency/throughput statistics |
-| `requests.csv` | Per-request raw data: `tenant_id, request_idx, ttft_ms, tpot_ms, mean_itl_ms, e2e_ms, num_input_tokens, num_output_tokens, start_time` |
+| `requests.csv` | Per-request raw data: `tenant_id, request_idx, ttft_ms, mean_itl_ms, p50_itl_ms, p95_itl_ms, p99_itl_ms, e2e_ms, num_output_tokens, start_time` |
 
 ---
 

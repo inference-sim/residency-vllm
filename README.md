@@ -162,7 +162,7 @@ results/sweep_tenants/5T_agg_10rps/
 
 ### Per-request (requests.csv)
 
-`tenant_id, request_idx, ttft_ms, tpot_ms, mean_itl_ms, e2e_ms, num_input_tokens, num_output_tokens, start_time`
+`tenant_id, request_idx, ttft_ms, mean_itl_ms, p50_itl_ms, p95_itl_ms, p99_itl_ms, e2e_ms, num_output_tokens, start_time`
 
 ### Per-tenant and overall (summary.json)
 
