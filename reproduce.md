@@ -160,7 +160,7 @@ Total: 9 experiments × 10 minutes each.
 |---|---|
 | Model | Qwen/Qwen3-14B |
 | GPU | 1× NVIDIA GPU per variant (2 total for A/B) |
-| Prompt length | 1024 words = exactly 1024 tokens + 5 chat-template overhead = 1029 input tokens |
+| Prompt length | 1024 words ≈ 1024 tokens + 8 chat-template overhead ≈ 1032 input tokens |
 | Max output tokens | 128 (always hit — output is exactly 128 tokens) |
 | Arrival process | Poisson (independent per tenant) |
 | Duration | 600 seconds per experiment |
