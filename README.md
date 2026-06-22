@@ -168,12 +168,10 @@ results/sweep_tenants/5T_agg_10rps/
 
 - **TTFT** — time to first token (prefill + queue wait)
 - **ITL** — inter-token latency (flattened across all requests)
-- **TPOT** — time per output token: (last_token - first_token) / (n - 1)
 - **E2E** — end-to-end latency
-- **Throughput** — input/output/total tokens per second, requests per second
-- **Residency** — `residency_token_seconds` scraped from Prometheus endpoint
+- **Residency** — `residency_token_seconds` scraped from Prometheus endpoint (patched only)
 
-Statistics reported: mean, min, max, median, p90, p99.
+Statistics reported: mean, p50, p95, p99.
 
 ## Configuration
 
