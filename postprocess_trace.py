@@ -125,7 +125,7 @@ def parse_itl_csv(path):
         for row in reader:
             rid = row.get("request_id", "")
             # ITL file has per-chunk timestamps; compute deltas
-            chunk_time_us = int(row.get("timestamp_us", row.get("chunk_time_us", 0)) or 0)
+            chunk_time_us = int(row.get("timestamp_us", 0) or 0)
             itl_by_request[rid].append(chunk_time_us)
 
     # Convert absolute timestamps to inter-chunk deltas (ms)
