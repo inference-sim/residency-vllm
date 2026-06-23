@@ -79,12 +79,12 @@ run_one() {
     --seed "$SEED" \
     --tenants "$tenants"
 
-  # Copy results to destination
+  # Copy results to destination (summary + trace files)
   mkdir -p "$dest_dir/patched" "$dest_dir/vanilla"
-  cp "$RESULTS_DIR/patched/summary.json" "$dest_dir/patched/"
-  cp "$RESULTS_DIR/patched/requests.csv" "$dest_dir/patched/"
-  cp "$RESULTS_DIR/vanilla/summary.json" "$dest_dir/vanilla/"
-  cp "$RESULTS_DIR/vanilla/requests.csv" "$dest_dir/vanilla/"
+  for f in summary.json requests.csv trace.yaml trace.csv trace.itl.csv; do
+    [ -f "$RESULTS_DIR/patched/$f" ] && cp "$RESULTS_DIR/patched/$f" "$dest_dir/patched/"
+    [ -f "$RESULTS_DIR/vanilla/$f" ] && cp "$RESULTS_DIR/vanilla/$f" "$dest_dir/vanilla/"
+  done
 
   # Clean up temporary download dirs
   rm -rf "$RESULTS_DIR/patched" "$RESULTS_DIR/vanilla"

@@ -67,6 +67,7 @@ spec:
         # --- Workload driver (blis observe) ---
         - name: driver
           image: ghcr.io/inference-sim/residency-vllm-observe:0.23.0-residency-v2
+          imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -178,6 +179,7 @@ spec:
         # --- Workload driver (blis observe) ---
         - name: driver
           image: ghcr.io/inference-sim/residency-vllm-observe:0.23.0-residency-v2
+          imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
             - |
