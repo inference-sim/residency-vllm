@@ -5,7 +5,7 @@ counter (`vllm:residency_token_seconds_total`) that accumulates token-seconds
 of GPU KV-cache occupancy per tenant, with fair splitting of shared prefix-cache
 blocks.
 
-**Released image:** `ghcr.io/inference-sim/residency-vllm:0.23.1-residency`
+**Released image:** `ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2`
 (based on `vllm/vllm-openai:v0.23.0`)
 
 Includes an A/B experiment framework that runs identical Poisson workloads
@@ -49,12 +49,12 @@ oc create secret generic hf-token --from-literal=token=<YOUR_HF_TOKEN>
 
 ```bash
 # Patched vLLM server
-docker build -t ghcr.io/inference-sim/residency-vllm:0.23.1-residency .
-docker push ghcr.io/inference-sim/residency-vllm:0.23.1-residency
+docker build -t ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2 .
+docker push ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2
 
-# Workload driver
-docker build -f Dockerfile.client -t ghcr.io/inference-sim/residency-vllm-client:latest .
-docker push ghcr.io/inference-sim/residency-vllm-client:latest
+# Workload driver (blis observe + postprocessor)
+docker build -f Dockerfile.observe -t ghcr.io/inference-sim/residency-vllm-observe:0.23.0-residency-v2 .
+docker push ghcr.io/inference-sim/residency-vllm-observe:0.23.0-residency-v2
 ```
 
 ### 3. Run a single A/B experiment
@@ -91,12 +91,14 @@ Two Kubernetes Jobs run simultaneously on separate GPUs:
 
 | Variant | Server Image | Difference |
 |---|---|---|
-| Patched | `ghcr.io/inference-sim/residency-vllm:0.23.1-residency` | Residency counter enabled |
+| Patched | `ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2` | Residency counter enabled |
 | Vanilla | `vllm/vllm-openai:v0.23.0` | Stock vLLM, no instrumentation |
 
 Both receive identical workload (same seed, rate, tenants, prompt length) via
-a co-located driver container.  Metrics are measured client-side from SSE
-streaming token timestamps.
+a co-located driver container running [blis observe](https://github.com/inference-sim/inference-sim).
+The driver generates a calibrated Poisson workload from a declarative YAML spec
+and records per-request trace data (TraceV2 format) with server-reported token
+counts via `include_usage`.
 
 ### Default experiment parameters
 
@@ -111,13 +113,13 @@ streaming token timestamps.
 
 ### Sweep configurations
 
-**Rate sweep** — 5 tenants fixed, per-tenant rate varies (1, 2, 3, 4 req/s):
+**Rate sweep** — 2 tenants fixed, per-tenant rate varies (1, 2, 3, 4 req/s):
 
 ```
-results/sweep_rate/agg_5rps/    (1 req/s × 5 tenants)
-results/sweep_rate/agg_10rps/   (2 req/s × 5 tenants)
-results/sweep_rate/agg_15rps/   (3 req/s × 5 tenants)
-results/sweep_rate/agg_20rps/   (4 req/s × 5 tenants)
+results/sweep_rate/agg_2rps/    (1 req/s × 2 tenants)
+results/sweep_rate/agg_4rps/    (2 req/s × 2 tenants)
+results/sweep_rate/agg_6rps/    (3 req/s × 2 tenants)
+results/sweep_rate/agg_8rps/    (4 req/s × 2 tenants)
 ```
 
 **Tenant sweep** — 2 req/s per tenant fixed, tenant count varies (1–5):
@@ -135,13 +137,15 @@ results/sweep_tenants/5T_agg_10rps/
 ```
 .
 ├── Dockerfile                    # Patched vLLM server image
-├── Dockerfile.client             # Workload driver image
-├── requirements-client.txt       # Driver dependencies (aiohttp)
-├── workload_driver.py            # Poisson workload generator + metrics
+├── Dockerfile.observe            # blis observe driver image
+├── postprocess_trace.py          # Converts trace.csv → summary.json + requests.csv
 ├── run_ab_experiment.sh          # Single A/B experiment
 ├── run_sweep.sh                  # Rate + tenant sweep orchestration
 ├── generate_figures.py           # Produce comparison figures
 ├── reproduce.md                  # Full reproduction instructions
+├── experiment_specs.md           # Detailed experiment specifications
+├── workloads/
+│   └── residency_5t.yaml        # Reference blis observe workload spec
 ├── k8s/
 │   ├── ab-experiment.yaml        # Two Jobs (patched + vanilla)
 │   └── deployment.yaml           # Standalone deployment + service
@@ -172,6 +176,12 @@ results/sweep_tenants/5T_agg_10rps/
 - **Residency** — `residency_token_seconds` scraped from Prometheus endpoint (patched only)
 
 Statistics reported: mean, p50, p95, p99.
+
+### Trace files (TraceV2 format from blis observe)
+
+- `trace.yaml` — experiment metadata header
+- `trace.csv` — per-request trace with server-reported token counts
+- `trace.itl.csv` — per-chunk ITL timestamps
 
 ## Configuration
 

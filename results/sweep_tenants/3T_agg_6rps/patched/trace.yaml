@@ -1,0 +1,12 @@
+trace_version: 3
+time_unit: us
+created_at: "2026-06-23T04:32:22Z"
+mode: real
+warm_up_requests: 0
+workload_seed: 42
+workload_spec: /data/residency/workload.yaml
+server:
+    type: vllm
+    model: Qwen/Qwen3-14B
+network: {}
+

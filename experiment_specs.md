@@ -28,7 +28,7 @@ server simultaneously.
 | Precision | Default (BF16) |
 | Context length | Default (32k) |
 | vLLM version (vanilla) | `vllm/vllm-openai:v0.23.0` |
-| vLLM version (patched) | `ghcr.io/inference-sim/residency-vllm:0.23.1-residency` |
+| vLLM version (patched) | `ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2` |
 | Server flags | `vllm serve --model Qwen/Qwen3-14B --port 8000` |
 
 ---
@@ -37,55 +37,45 @@ server simultaneously.
 
 | Parameter | Value |
 |---|---|
+| Driver | [blis observe](https://github.com/inference-sim/inference-sim) |
+| Workload spec format | TraceV2 YAML (declarative) |
 | Arrival process | Poisson (independent per tenant) |
-| Inter-arrival time | `random.expovariate(rate)` per tenant |
-| Prompt tokens | 1024 (see Token Distribution below) |
-| Max output tokens | 128 (always hit — output is exactly 128 tokens) |
+| Prompt tokens | 1024 (blis calibrates word count to hit target) |
+| Max output tokens | 128 (enforced via `min_tokens = max_tokens`) |
 | Streaming | Yes (SSE) |
 | Duration | 600 seconds per experiment |
-| Random seed | 42 (tenant seeds: 42 + tenant_index) |
+| Random seed | 42 |
 | Warmup | None (cold start included) |
 
 ### Token Distribution
 
-The workload driver generates prompts by sampling 1024 **words** uniformly from
-a 131-word English vocabulary (`_VOCAB` in `workload_driver.py`). The driver's
-`--prompt-tokens` flag controls the number of words, not actual BPE tokens — the
-naming is a misnomer reflecting the ~1:1 word-to-token ratio for this vocabulary.
-
-**Words vs tokens (verified with Qwen3-14B tokenizer):**
+The workload driver (`blis observe`) generates prompts calibrated to produce
+exactly 1024 tokens when tokenized by the target model. It uses an internal
+calibration step to determine the word-to-token ratio for the specific model's
+tokenizer, then generates prompts of the appropriate word count.
 
 | Property | Value |
 |---|---|
-| Words per prompt | 1024 (fixed) |
-| Content tokens per prompt | ~1024 (mean=1024.03, std=0.17) |
-| Chat-template overhead | 8 tokens (ChatML: `<\|im_start\|>user\n...<\|im_end\|>\n<\|im_start\|>assistant`) |
+| Target input tokens | 1024 |
+| Chat-template overhead | ~8 tokens (ChatML format) |
 | Total tokens seen by model | ~1032 |
-| Output tokens per request | 128 (always hits `max_tokens`) |
-
-The ~1:1 ratio holds because 130 of the 131 vocabulary words tokenize to
-exactly 1 token with Qwen3-14B's tokenizer. The exception is "saw" (2 tokens),
-which causes occasional prompts to have 1025 content tokens (std=0.17,
-negligible variance).
-
-The summary.json and workload driver report `prompt_tokens: 1024` (the CLI
-argument). The actual tokens seen by the model are ~1032 due to the 8-token
-chat-template overhead added by vLLM when using the `/v1/chat/completions`
-endpoint.
+| Output tokens per request | 128 (enforced via `min_tokens = max_tokens`) |
 
 All tenants use identical token distributions (homogeneous workload). The only
-difference between tenants is their arrival process seed (`42 + tenant_index`).
+difference between tenants is their arrival process timing (seeded by the
+workload spec).
 
 ### Tenant ID injection
 
-Each request includes a `vllm_xargs` field:
+Each request includes the tenant ID via HTTP header:
 
-```json
-{"vllm_xargs": {"tenant_id": "tenant_A"}}
+```
+x-gateway-inference-fairness-id: tenant_A
 ```
 
-The patched server extracts this for residency accounting. The vanilla server
-ignores unknown fields.
+The patched server reads this header in `serving.py` and stores it in
+`sampling_params.extra_args["tenant_id"]` for residency accounting. The vanilla
+server ignores the header.
 
 ---
 
@@ -93,14 +83,14 @@ ignores unknown fields.
 
 ### Rate Sweep
 
-Fixed: 5 tenants (`tenant_A` through `tenant_E`), 600s duration, seed 42.
+Fixed: 2 tenants (`tenant_A`, `tenant_B`), 600s duration, seed 42.
 
 | Experiment | Per-tenant rate | Aggregate rate | Total requests (approx) |
 |---|---|---|---|
-| `agg_5rps` | 1 req/s | 5 req/s | ~3,000 |
-| `agg_10rps` | 2 req/s | 10 req/s | ~6,000 |
-| `agg_15rps` | 3 req/s | 15 req/s | ~9,000 |
-| `agg_20rps` | 4 req/s | 20 req/s | ~12,000 |
+| `agg_2rps` | 1 req/s | 2 req/s | ~1,200 |
+| `agg_4rps` | 2 req/s | 4 req/s | ~2,400 |
+| `agg_6rps` | 3 req/s | 6 req/s | ~3,600 |
+| `agg_8rps` | 4 req/s | 8 req/s | ~4,800 |
 
 ### Tenant Sweep
 
@@ -110,8 +100,8 @@ Fixed: 2 req/s per tenant, 600s duration, seed 42.
 |---|---|---|---|
 | `1T_agg_2rps` | 1 | 2 req/s | ~1,200 |
 | `2T_agg_4rps` | 2 | 4 req/s | ~2,400 |
-| `3T_agg_6rps` | 3 | 6 req/s | ~3,500 |
-| `4T_agg_8rps` | 4 | 8 req/s | ~4,700 |
+| `3T_agg_6rps` | 3 | 6 req/s | ~3,600 |
+| `4T_agg_8rps` | 4 | 8 req/s | ~4,800 |
 | `5T_agg_10rps` | 5 | 10 req/s | ~6,000 |
 
 ---
@@ -150,11 +140,11 @@ For each latency metric: mean, min, max, median (p50), p90, p99.
 
 | Control | How |
 |---|---|
-| Same workload | Identical random seed, rate, tenants, prompt length, max tokens |
+| Same workload | Identical workload spec YAML (same seed, rate, tenants, token counts) |
 | Same model weights | Both pods mount the same `vllm-cache-pvc` |
 | Same hardware class | Both pods request `nvidia.com/gpu: 1`, scheduled on same node type |
 | Simultaneous execution | Both Jobs launched at the same time, run in parallel |
-| Same driver code | Both variants use the same `residency-vllm-client` image |
+| Same driver code | Both variants use the same `residency-vllm-observe` driver image |
 | Same server config | Identical `vllm serve` flags (no extra args on either variant) |
 | No contention | Each variant gets a dedicated GPU (no GPU sharing) |
 
@@ -168,16 +158,20 @@ Each experiment produces per variant:
 |---|---|
 | `summary.json` | Per-tenant + overall latency/throughput statistics |
 | `requests.csv` | Per-request raw data: `tenant_id, request_idx, ttft_ms, mean_itl_ms, p50_itl_ms, p95_itl_ms, p99_itl_ms, e2e_ms, num_output_tokens, start_time` |
+| `trace.yaml` | TraceV2 metadata header (blis observe native output) |
+| `trace.csv` | Per-request trace with server-reported token counts |
+| `trace.itl.csv` | Per-chunk ITL timestamps |
 
 ---
 
 ## Key Findings
 
-- At non-saturated load (1-2 req/s/tenant), the residency instrumentation adds
-  **~1% E2E overhead** (median across all per-tenant p50 comparisons).
-- Both variants exhibit identical scaling behavior up to the saturation point
-  (~3 req/s/tenant for this model on H100).
-- Beyond saturation, queueing dominates and small per-step differences are
-  amplified (TTFT grows to tens of seconds as requests queue).
-- The overhead is most directly visible in ITL (~0.25-2%) since the residency
+- At non-saturated load (1–4 req/s/tenant with 2 tenants), the residency
+  instrumentation adds **~0–1% E2E overhead** (median across all per-tenant
+  p50 comparisons).
+- Both variants exhibit identical scaling behavior up to the saturation point.
+- The overhead is most directly visible in ITL (~0.5–1%) since the residency
   accounting runs in the decode loop and ITL measures per-step duration.
+- Adding more tenants at the same aggregate rate does not increase overhead —
+  the per-step accounting cost is proportional to the number of active tenants
+  but remains negligible.

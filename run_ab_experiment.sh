@@ -95,7 +95,7 @@ oc run ab-setup --rm -i --restart=Never --image=busybox \
       "containers":[{
         "name":"ab-setup",
         "image":"busybox",
-        "command":["sh","-c","chmod 777 /data/residency && cat > /data/residency/workload.yaml && rm -f /data/residency/patched/.done /data/residency/vanilla/.done"],
+        "command":["sh","-c","mkdir -p /data/residency && chmod 777 /data/residency && rm -rf /data/residency/patched /data/residency/vanilla && cat > /data/residency/workload.yaml"],
         "stdin": true,
         "securityContext":{"runAsUser":0},
         "volumeMounts":[{"name":"data","mountPath":"/data"}]

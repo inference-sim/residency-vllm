@@ -32,6 +32,10 @@ vllm/v1/engine/core.py      — calls _accumulate_residency() after every schedu
 vllm/v1/core/kv_cache_manager.py — tracks per-tenant fractional block ownership
 ```
 
+Additionally, `vllm/entrypoints/openai/chat_completion/serving.py` is patched
+to read `tenant_id` from the `x-gateway-inference-fairness-id` HTTP header
+(used by blis observe) in addition to the `vllm_xargs` body field.
+
 ### What the patch does
 
 After each scheduler step (both prefill and decode), the engine multiplies each
@@ -48,21 +52,23 @@ Full patch specification: `docs/vllm-patch-spec.md`
 ### Patched vLLM server
 
 ```bash
-docker build -t ghcr.io/inference-sim/residency-vllm:0.23.1-residency .
-docker push ghcr.io/inference-sim/residency-vllm:0.23.1-residency
+docker build -t ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2 .
+docker push ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2
 ```
 
-This overlays the 3 patched Python files onto the stock `vllm/vllm-openai:v0.23.0`
+This overlays the patched Python files onto the stock `vllm/vllm-openai:v0.23.0`
 base image (see `Dockerfile`).
 
-### Workload driver client
+### Workload driver (blis observe)
 
 ```bash
-docker build -f Dockerfile.client -t ghcr.io/inference-sim/residency-vllm-client:latest .
-docker push ghcr.io/inference-sim/residency-vllm-client:latest
+docker build -f Dockerfile.observe -t ghcr.io/inference-sim/residency-vllm-observe:0.23.0-residency-v2 .
+docker push ghcr.io/inference-sim/residency-vllm-observe:0.23.0-residency-v2
 ```
 
-Contains `workload_driver.py` and its dependency (`aiohttp`).
+This builds [blis](https://github.com/inference-sim/inference-sim) from source
+(Go binary) and bundles it with `postprocess_trace.py` (Python post-processor
+that converts blis trace output to summary.json + requests.csv).
 
 ---
 
@@ -72,7 +78,7 @@ Contains `workload_driver.py` and its dependency (`aiohttp`).
 
 ```yaml
 # vllm-cache-pvc: stores HuggingFace model weights (persists across experiments)
-# data-pvc: stores experiment results (summary.json, requests.csv)
+# data-pvc: stores experiment results (summary.json, requests.csv, trace files)
 ```
 
 Both must be RWX (ReadWriteMany) since patched and vanilla pods run concurrently
@@ -99,15 +105,18 @@ Subsequent experiments reuse the cached weights.
 ./run_ab_experiment.sh --duration 600 --rate 2.0 --tenants "tenant_A,tenant_B,tenant_C,tenant_D,tenant_E" --seed 42
 ```
 
-This launches two Kubernetes Jobs simultaneously:
-- `residency-experiment-patched` — uses `ghcr.io/inference-sim/residency-vllm:0.23.1-residency`
-- `residency-experiment-vanilla` — uses `vllm/vllm-openai:v0.23.0`
+This:
+1. Generates a blis observe workload spec YAML from the provided arguments
+2. Uploads the spec to `data-pvc` (clearing stale results)
+3. Launches two Kubernetes Jobs simultaneously:
+   - `residency-experiment-patched` — uses `ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2`
+   - `residency-experiment-vanilla` — uses `vllm/vllm-openai:v0.23.0`
+4. Waits for both to complete
+5. Downloads results to `results/patched/` and `results/vanilla/`
 
 Each Job is a single pod with two containers (server + driver) sharing
 `localhost` via `shareProcessNamespace: true`.  Both receive identical workload
 parameters and random seed for fair comparison.
-
-Results are downloaded to `results/patched/` and `results/vanilla/`.
 
 ### Full sweep
 
@@ -117,14 +126,14 @@ Results are downloaded to `results/patched/` and `results/vanilla/`.
 
 Default sweep configuration:
 
-**Rate sweep** (5 tenants fixed, vary per-tenant rate):
+**Rate sweep** (2 tenants fixed, vary per-tenant rate):
 
 | Per-tenant rate | Aggregate rate | Tenants | Output dir |
 |---|---|---|---|
-| 1 req/s | 5 rps | 5 | `results/sweep_rate/agg_5rps/` |
-| 2 req/s | 10 rps | 5 | `results/sweep_rate/agg_10rps/` |
-| 3 req/s | 15 rps | 5 | `results/sweep_rate/agg_15rps/` |
-| 4 req/s | 20 rps | 5 | `results/sweep_rate/agg_20rps/` |
+| 1 req/s | 2 rps | 2 | `results/sweep_rate/agg_2rps/` |
+| 2 req/s | 4 rps | 2 | `results/sweep_rate/agg_4rps/` |
+| 3 req/s | 6 rps | 2 | `results/sweep_rate/agg_6rps/` |
+| 4 req/s | 8 rps | 2 | `results/sweep_rate/agg_8rps/` |
 
 **Tenant sweep** (2 req/s per tenant fixed, vary tenant count):
 
@@ -142,7 +151,7 @@ Total: 9 experiments × 10 minutes each.
 
 ```bash
 # Different rate points
-./run_sweep.sh --rates "1,2,4,6,8" --rate-tenants 5
+./run_sweep.sh --rates "1,2,4,6,8" --rate-tenants 3
 
 # Different tenant counts
 ./run_sweep.sh --tenants "1,3,5,10" --tenant-rate 2.0
@@ -161,32 +170,39 @@ Total: 9 experiments × 10 minutes each.
 | Model | Qwen/Qwen3-14B |
 | GPU | 1× NVIDIA GPU per variant (2 total for A/B) |
 | Prompt tokens | 1024 |
-| Max output tokens | 128 (always hit — output is exactly 128 tokens) |
+| Max output tokens | 128 (enforced via `min_tokens = max_tokens`) |
 | Arrival process | Poisson (independent per tenant) |
 | Duration | 600 seconds per experiment |
-| Random seed | 42 (tenant seeds: 42, 43, 44, ...) |
-| Server version (patched) | `ghcr.io/inference-sim/residency-vllm:0.23.1-residency` |
+| Random seed | 42 |
+| Server version (patched) | `ghcr.io/inference-sim/residency-vllm:0.23.0-residency-v2` |
 | Server version (vanilla) | `vllm/vllm-openai:v0.23.0` |
 
 ### Workload driver details
 
+The workload driver is [blis observe](https://github.com/inference-sim/inference-sim),
+which reads a declarative workload spec YAML and generates calibrated requests:
+
 - Each tenant runs an independent Poisson process with rate R req/s
-- Inter-arrival times: `random.expovariate(R)` (exponentially distributed)
-- Each tenant gets a deterministic seed (base_seed + tenant_index) for reproducibility
+- Input tokens: 1024 (blis calibrates prompt word count to produce exactly 1024 tokens)
+- Output tokens: 128 (enforced via `min_tokens = max_tokens = 128`)
 - Requests are streamed (SSE); metrics measured client-side on token arrival timestamps
+- Tenant ID is injected via `x-gateway-inference-fairness-id` HTTP header
 - TTFT: time from request send to first token chunk received
-- ITL: wall-clock gap between consecutive token chunks (flattened across all requests)
+- ITL: wall-clock gap between consecutive token chunks
 - E2E: time from request send to final token chunk received
 
 ---
 
 ## 6. Output Format
 
-Each experiment produces two files per variant:
+Each experiment produces per variant:
 
 ```
-summary.json  — per-tenant and overall latency/throughput statistics
-requests.csv  — per-request raw data (tenant_id, ttft, itl, e2e, timestamps)
+summary.json    — per-tenant and overall latency/throughput statistics
+requests.csv    — per-request raw data (tenant_id, ttft, itl, e2e, timestamps)
+trace.yaml      — TraceV2 metadata header (blis observe native format)
+trace.csv       — per-request trace with server-reported token counts
+trace.itl.csv   — per-chunk ITL timestamps
 ```
 
 Directory structure after full sweep:
@@ -194,17 +210,17 @@ Directory structure after full sweep:
 ```
 results/
 ├── sweep_rate/
-│   ├── agg_5rps/{patched,vanilla}/summary.json
-│   ├── agg_10rps/{patched,vanilla}/summary.json
-│   ├── agg_15rps/{patched,vanilla}/summary.json
-│   ├── agg_20rps/{patched,vanilla}/summary.json
+│   ├── agg_2rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+│   ├── agg_4rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+│   ├── agg_6rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+│   ├── agg_8rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
 │   └── figure_rate_sweep.png
 └── sweep_tenants/
-    ├── 1T_agg_2rps/{patched,vanilla}/summary.json
-    ├── 2T_agg_4rps/{patched,vanilla}/summary.json
-    ├── 3T_agg_6rps/{patched,vanilla}/summary.json
-    ├── 4T_agg_8rps/{patched,vanilla}/summary.json
-    ├── 5T_agg_10rps/{patched,vanilla}/summary.json
+    ├── 1T_agg_2rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+    ├── 2T_agg_4rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+    ├── 3T_agg_6rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+    ├── 4T_agg_8rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
+    ├── 5T_agg_10rps/{patched,vanilla}/{summary.json,requests.csv,trace.*}
     └── figure_tenant_sweep.png
 ```
 
@@ -238,13 +254,15 @@ pip install matplotlib numpy
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Builds patched vLLM server image |
-| `Dockerfile.client` | Builds workload driver image |
+| `Dockerfile.observe` | Builds blis observe driver image |
+| `postprocess_trace.py` | Converts blis trace.csv → summary.json + requests.csv |
 | `vllm/v1/engine/core.py` | Patched engine with residency accumulation |
 | `vllm/v1/core/kv_cache_manager.py` | Patched KV cache with per-tenant tracking |
 | `vllm/v1/request.py` | Patched request with tenant_id property |
-| `workload_driver.py` | Poisson workload generator + metrics collector |
+| `vllm/entrypoints/openai/chat_completion/serving.py` | Header-based tenant_id injection |
+| `workloads/residency_5t.yaml` | Reference blis observe workload spec |
 | `k8s/ab-experiment.yaml` | Kubernetes Jobs for both variants |
-| `run_ab_experiment.sh` | Runs one A/B experiment |
+| `run_ab_experiment.sh` | Runs one A/B experiment (generates workload spec dynamically) |
 | `run_sweep.sh` | Orchestrates rate + tenant sweeps |
 | `generate_figures.py` | Produces comparison figures from results |
 | `docs/vllm-patch-spec.md` | Exact patch instructions for vLLM v0.23.0 |
@@ -265,3 +283,10 @@ experiment.
 
 **GPU scheduling**: Both variants need a GPU simultaneously.  Ensure the cluster
 has at least 2 free GPUs before starting an A/B experiment.
+
+**Stale results on PVC**: The setup step clears `/data/residency/patched` and
+`/data/residency/vanilla` before each experiment. If you see identical results
+across experiments, verify the setup pod ran successfully.
+
+**ITL all zeros**: Ensure `imagePullPolicy: Always` is set on the driver container
+so the cluster pulls the latest image with the correct column parsing.
