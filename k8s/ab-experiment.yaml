@@ -71,9 +71,15 @@ spec:
           args:
             - |
               echo "Waiting for vLLM server to be ready..."
-              while ! wget -q -O /dev/null http://localhost:8000/v1/models 2>/dev/null; do
-                sleep 5
-              done
+              python3 -c "
+              import urllib.request, time
+              while True:
+                  try:
+                      urllib.request.urlopen('http://localhost:8000/v1/models')
+                      break
+                  except Exception:
+                      time.sleep(5)
+              "
               echo "Server ready. Starting experiment (patched variant)."
 
               VARIANT="patched"
@@ -176,9 +182,15 @@ spec:
           args:
             - |
               echo "Waiting for vLLM server to be ready..."
-              while ! wget -q -O /dev/null http://localhost:8000/v1/models 2>/dev/null; do
-                sleep 5
-              done
+              python3 -c "
+              import urllib.request, time
+              while True:
+                  try:
+                      urllib.request.urlopen('http://localhost:8000/v1/models')
+                      break
+                  except Exception:
+                      time.sleep(5)
+              "
               echo "Server ready. Starting experiment (vanilla variant)."
 
               VARIANT="vanilla"
