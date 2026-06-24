@@ -1,0 +1,67 @@
+{
+  "scheduler": "fcfs",
+  "seed": 42,
+  "duration_s": 600,
+  "warmup_s": 0,
+  "active_duration_us": 627727608,
+  "total_kv_blocks": 18038,
+  "total_kv_capacity_token_us": 181167209489664,
+  "tenants": {
+    "tenantA": {
+      "kv_time_token_us": 4265536365440,
+      "memory_time_share": 0.02354474839821032,
+      "completed_requests": 1820,
+      "ttft_percentiles": {
+        "p50_us": 54141,
+        "p95_us": 71280.49999999999,
+        "p99_us": 76833.91
+      },
+      "submitted_requests": 1820,
+      "unserved_at_horizon": 0,
+      "in_flight_at_horizon": 0,
+      "completion_rate": 1,
+      "prompt_blocks_p50": 62,
+      "prompt_blocks_p95": 64,
+      "prompt_blocks_p99": 64,
+      "prompt_blocks_max": 66,
+      "frac_prompt_blocks_over_omega_K": 0,
+      "censored_ttft_lower_bound": {
+        "p50_us": 54127,
+        "p95_us": 71276,
+        "p99_us": 76744
+      }
+    },
+    "tenantB": {
+      "kv_time_token_us": 21084363635680,
+      "memory_time_share": 0.11638068332052612,
+      "completed_requests": 9009,
+      "ttft_percentiles": {
+        "p50_us": 53851,
+        "p95_us": 71066.2,
+        "p99_us": 76892.51999999999
+      },
+      "submitted_requests": 9009,
+      "unserved_at_horizon": 0,
+      "in_flight_at_horizon": 0,
+      "completion_rate": 1,
+      "prompt_blocks_p50": 62,
+      "prompt_blocks_p95": 64,
+      "prompt_blocks_p99": 64,
+      "prompt_blocks_max": 66,
+      "frac_prompt_blocks_over_omega_K": 0,
+      "censored_ttft_lower_bound": {
+        "p50_us": 53851,
+        "p95_us": 71065,
+        "p99_us": 76887
+      }
+    }
+  },
+  "memorytime_share_ratio": 4.942957187402879,
+  "conservation_violations": 0,
+  "total_meter_ticks": 36246,
+  "backlog_nonempty_ticks": 11020,
+  "total_completed_requests": 10829,
+  "sim_ended_us": 1782244110159237,
+  "tau_idle_us": 37096761,
+  "idle_fraction": 0.05909690847944989
+}

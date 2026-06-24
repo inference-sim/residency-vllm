@@ -1,0 +1,169 @@
+{
+  "config": {
+    "model": "Qwen/Qwen3-14B",
+    "tenants": [
+      "tenantA",
+      "tenantB"
+    ],
+    "prompt_tokens": 1024,
+    "max_tokens": 128,
+    "rate_per_tenant": 30.0,
+    "rate": 30.0,
+    "aggregate_rate": 60.0,
+    "duration": 600,
+    "seed": 42
+  },
+  "overall": {
+    "num_requests": 17959,
+    "num_successful": 17959,
+    "ttft_ms": {
+      "mean": 977.9,
+      "min": 70.81,
+      "max": 2838.95,
+      "p50": 1056.27,
+      "median": 1056.27,
+      "p90": 1101.89,
+      "p99": 1481.95
+    },
+    "itl_ms": {
+      "mean": 105.41,
+      "min": 0.0,
+      "max": 735.71,
+      "p50": 30.68,
+      "median": 30.68,
+      "p90": 361.81,
+      "p99": 370.38
+    },
+    "e2e_ms": {
+      "mean": 14575.4,
+      "min": 2425.36,
+      "max": 16323.08,
+      "p50": 14637.88,
+      "median": 14637.88,
+      "p90": 14666.16,
+      "p99": 15018.16
+    },
+    "total_input_tokens": 18390016,
+    "total_output_tokens": 2298752,
+    "throughput": {
+      "input_tokens_per_sec": 1126626.87,
+      "output_tokens_per_sec": 140828.36,
+      "requests_per_sec": 1100.22
+    },
+    "residency_token_seconds_total": 163605864.93,
+    "latency": {
+      "ttft_ms": {
+        "mean": 977.9,
+        "min": 70.81,
+        "max": 2838.95,
+        "p50": 1056.27,
+        "median": 1056.27,
+        "p90": 1101.89,
+        "p99": 1481.95
+      },
+      "itl_ms": {
+        "mean": 105.41,
+        "min": 0.0,
+        "max": 735.71,
+        "p50": 30.68,
+        "median": 30.68,
+        "p90": 361.81,
+        "p99": 370.38
+      },
+      "e2e_ms": {
+        "mean": 14575.4,
+        "min": 2425.36,
+        "max": 16323.08,
+        "p50": 14637.88,
+        "median": 14637.88,
+        "p90": 14666.16,
+        "p99": 15018.16
+      }
+    }
+  },
+  "per_tenant": {
+    "tenantA": {
+      "num_requests": 3010,
+      "num_successful": 3010,
+      "ttft_ms": {
+        "mean": 975.21,
+        "min": 102.4,
+        "max": 2787.04,
+        "p50": 1056.42,
+        "median": 1056.42,
+        "p90": 1102.59,
+        "p99": 1479.37
+      },
+      "itl_ms": {
+        "mean": 105.37,
+        "min": 0.01,
+        "max": 735.67,
+        "p50": 30.68,
+        "median": 30.68,
+        "p90": 361.78,
+        "p99": 370.38
+      },
+      "e2e_ms": {
+        "mean": 14567.81,
+        "min": 2717.77,
+        "max": 16036.27,
+        "p50": 14637.42,
+        "median": 14637.42,
+        "p90": 14666.6,
+        "p99": 15022.17
+      },
+      "total_input_tokens": 3082240,
+      "total_output_tokens": 385280,
+      "throughput": {
+        "input_tokens_per_sec": 192204.27,
+        "output_tokens_per_sec": 24025.53,
+        "requests_per_sec": 187.7
+      },
+      "residency_token_seconds": 27431103.707688138
+    },
+    "tenantB": {
+      "num_requests": 14949,
+      "num_successful": 14949,
+      "ttft_ms": {
+        "mean": 978.44,
+        "min": 70.81,
+        "max": 2838.95,
+        "p50": 1056.23,
+        "median": 1056.23,
+        "p90": 1101.75,
+        "p99": 1482.23
+      },
+      "itl_ms": {
+        "mean": 105.41,
+        "min": 0.0,
+        "max": 735.71,
+        "p50": 30.68,
+        "median": 30.68,
+        "p90": 361.82,
+        "p99": 370.37
+      },
+      "e2e_ms": {
+        "mean": 14576.92,
+        "min": 2425.36,
+        "max": 16323.08,
+        "p50": 14637.96,
+        "median": 14637.96,
+        "p90": 14666.13,
+        "p99": 15017.44
+      },
+      "total_input_tokens": 15307776,
+      "total_output_tokens": 1913472,
+      "throughput": {
+        "input_tokens_per_sec": 937799.71,
+        "output_tokens_per_sec": 117224.96,
+        "requests_per_sec": 915.82
+      },
+      "residency_token_seconds": 136174761.22188893
+    }
+  },
+  "totals": {
+    "total_requests": 17959,
+    "total_successful": 17959,
+    "total_duration_s": 600
+  }
+}
